@@ -2,6 +2,8 @@ import streamlit as st
 import pandas as pd
 import sqlite3
 import io
+import os
+import datetime
 
 # Custom page layout for the web engine
 st.set_page_config(page_title="Data Cleaner Portfolio", layout="wide")
@@ -15,7 +17,6 @@ has_full_access = False
 if user_tier == "Admin / Premium Login":
     entered_pass = st.sidebar.text_input("Enter Passkey", type="password")
     
-    # Custom administrative passkey verification
     if entered_pass == "123Shelby@":
         st.sidebar.success("🔥 Admin access granted. Rows limit removed!")
         has_full_access = True
@@ -39,20 +40,17 @@ my_raw_file = st.file_uploader("Drop your messy retail dataset here", type=["csv
 if my_raw_file is not None:
     file_format_csv = my_raw_file.name.endswith('.csv')
     
-    # Try-except safeguard to ensure unreadable formats don't crash the web portal
     try:
         loaded_df = pd.read_csv(my_raw_file) if file_format_csv else pd.read_excel(my_raw_file)
     except Exception as read_error:
         st.error(f"❌ File Reading Disruption: Structure is corrupted. Details: {read_error}")
         st.stop()
         
-    # --- STEP 3: OUTSIDER LIMITATION RULES ---
     total_dataset_rows = len(loaded_df)
     
     if not has_full_access and total_dataset_rows > 50:
         st.warning(f"⚠️ Free Tier Restriction: File contains {total_dataset_rows} rows. Caps apply at 50 rows.")
         st.info("💡 Enter the Admin Passkey in the sidebar panel to unlock unlimited enterprise processing rows.")
-        # Slice out a preview block for non-paying outsiders
         working_df = loaded_df.head(50).copy()
         st.subheader("📊 Ingested Dataset Overview (Restricted Free Tier Preview)")
     else:
@@ -61,9 +59,7 @@ if my_raw_file is not None:
         
     st.dataframe(working_df.head(10))
     
-    # --- STEP 4: CUSTOM TRANSFORM CLEANING LOGIC ---
     if fix_nulls:
-        # Pull numeric columns to prevent string transformation conflicts
         numeric_fields = working_df.select_dtypes(include=['number']).columns
         for field in numeric_fields:
             working_df[field] = working_df[field].fillna(working_df[field].median())
@@ -76,23 +72,18 @@ if my_raw_file is not None:
         st.sidebar.success(f"✔️ Flushed {rows_before - rows_after} duplicate transactional rows.")
         
     if clean_strings:
-        # Loop over object columns to strip financial notations and whitespaces
         for field in working_df.columns:
             if working_df[field].dtype == 'object':
                 working_df[field] = working_df[field].astype(str).str.replace('R', '', regex=False).str.replace('$', '', regex=False).str.strip()
-                # Attempt conversion back to numeric if column noise is removed
                 try:
                     working_df[field] = pd.to_numeric(working_df[field])
                 except:
-                    # Enforce proper string formatting for categories and names
                     working_df[field] = working_df[field].str.title()
         st.sidebar.success("✔️ Currency labels stripped and string casing standardized.")
         
-    # Display the final transformed overview on screen
     st.subheader("✨ Transformed Engine Preview")
     st.dataframe(working_df.head(10))
     
-    # --- STEP 5: BACKEND SQL INTEGRATION ---
     if push_to_database:
         try:
             db_connection = sqlite3.connect("retail_analytics.db")
@@ -102,7 +93,6 @@ if my_raw_file is not None:
         except Exception as database_error:
             st.sidebar.error(f"Database Exception: {database_error}")
 
-    # --- STEP 6: OUTPUT GENERATION MATCHING INPUT FORMAT ---
     st.markdown("---")
     st.subheader("💾 Export Clean Dataset")
     
@@ -125,3 +115,51 @@ if my_raw_file is not None:
             file_name=f"cleaned_{my_raw_file.name}",
             mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
         )
+
+# --- STEP 3: WORLD-CLASS USER REVIEW & ADMIN INSIGHTS SYSTEM ---
+st.markdown("---")
+st.subheader("⭐ User Experience Feedback Hub")
+
+# Create two visual columns: one for users to review, one for the Admin dashboard
+col1, col2 = st.columns([1, 1])
+
+with col1:
+    st.markdown("### Share Your Experience")
+    st.write("Help us make this engine the most powerful tool on the market. Leave a rating and recommend new cleaning features!")
+    
+    # Interactive Feedback Inputs
+    user_rating = st.slider("Rate the Data Janitor Engine (1 = Poor, 5 = Elite)", 1, 5, 5)
+    user_review = st.text_area("What features or adjustments would make this app better for your daily workflow?")
+    
+    if st.button("Submit Anonymous Feedback 🚀"):
+        if user_review.strip() != "":
+            # Save feedback to a local hidden text vault
+            timestamp = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+            log_entry = f"[{timestamp}] Rating: {user_rating}/5 | Feedback: {user_review}\n"
+            
+            with open("user_feedback_vault.txt", "a") as vault_file:
+                vault_file.write(log_entry)
+                
+            st.success("Thank you! Your recommendations have been safely transmitted directly to our engineering roadmap.")
+        else:
+            st.error("Please enter a text suggestion or feature recommendation before clicking submit.")
+
+with col2:
+    st.markdown("### 🔒 Private Administrator Dashboard")
+    if has_full_access:
+        st.write("Welcome back, Admin. Below are the raw, unedited feature requests and performance ratings submitted by your users:")
+        
+        if os.path.exists("user_feedback_vault.txt"):
+            with open("user_feedback_vault.txt", "r") as vault_file:
+                feedback_records = vault_file.readlines()
+            
+            # Show reviews in reverse order so the newest are always at the top
+            for record in reversed(feedback_records):
+                if "Rating: 5" in record or "Rating: 4" in record:
+                    st.info(record)
+                else:
+                    st.warning(record)
+        else:
+            st.info("No feedback has been submitted by users yet. System logs are completely clear.")
+    else:
+        st.info("🔒 Admin panel encrypted. Log in with your Master Passkey in the left panel to review user scores and workflow recommendations.")
