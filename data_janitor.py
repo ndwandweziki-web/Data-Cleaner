@@ -65,7 +65,6 @@ if 'current_logged_user' not in st.session_state:
 # --- PIPELINE MODULAR ADVANCED CLEANING ENGINE FUNCTIONS ---
 
 def clean_currency_and_strings(df, selected_columns=None):
-    """Safely strips currency symbols ONLY from financial vectors to prevent breaking general text."""
     df_clean = df.copy()
     if not selected_columns:
         selected_columns = [col for col in df_clean.columns if any(x in col.lower() for x in ['price', 'spent', 'amount', 'cost'])]
@@ -83,7 +82,6 @@ def clean_currency_and_strings(df, selected_columns=None):
     return df_clean
 
 def clean_context_imputation(df):
-    """Computes empty entries using cross-column dependencies and enforces zero-bounds."""
     df_clean = df.copy()
     if all(c in df_clean.columns for c in ['Price Per Unit', 'Quantity', 'Total Spent']):
         math_mask = df_clean['Total Spent'].isnull() & df_clean['Price Per Unit'].notnull() & df_clean['Quantity'].notnull()
@@ -101,7 +99,6 @@ def clean_context_imputation(df):
     return df_clean
 
 def display_visual_comparison(original_df, cleaned_df):
-    """Renders a side-by-side framework with highlighting showing modified rows."""
     st.markdown("### 🔄 Delta Engine Validation View")
     st.write("Review the differences below. Processed layout datasets are displayed side-by-side.")
     
@@ -115,7 +112,6 @@ def display_visual_comparison(original_df, cleaned_df):
     with col_clean:
         st.markdown("**✨ Cleaned Pipeline Output (Changes Highlighted)**")
         try:
-            # Highlight cells where values have changed from the original input
             styled_clean = clean_sample.style.apply(
                 lambda x: np.where(orig_sample != clean_sample, 'background-color: rgba(46, 204, 113, 0.25)', ''), 
                 axis=None
@@ -214,7 +210,6 @@ if my_raw_file is not None:
     else:
         working_df = loaded_df.copy()
 
-    # Create a completely untouched anchor duplicate of original ingestion state to calculate delta highlights
     working_df_original = working_df.copy()
 
     # --- AUTOMATED DATA HEALTH DIAGNOSTIC REPORT ---
@@ -271,7 +266,7 @@ if my_raw_file is not None:
     if custom_message:
         st.info(custom_message)
 
-    # --- STEP 5: AUTOMATED MODULAR PIPELINE EXECUTION WITH PROGRESS INDICATORS ---
+    # --- STEP 5: AUTOMATED MODULAR PIPELINE EXECUTION ---
     st.markdown("---")
     st.subheader("⚙️ Processing Engine Execution Log")
     
@@ -280,19 +275,16 @@ if my_raw_file is not None:
         status_text = st.empty()
         
         try:
-            # Phase 1: Currency Processing
             status_text.text("🧼 Isolating and scrubbing mixed currency formats...")
             if clean_strings:
                 working_df = clean_currency_and_strings(working_df)
             cleaning_progress.progress(25)
             
-            # Phase 2: Context Mathematical Alignments
             status_text.text("🧠 Re-calculating empty metrics and enforcing non-negative boundaries...")
             if smart_impute:
                 working_df = clean_context_imputation(working_df)
             cleaning_progress.progress(50)
             
-            # Phase 3: Cross-Column Math Checks
             status_text.text("📐 Executing financial cross-column audits...")
             if math_validate:
                 if 'Price Per Unit' in working_df.columns and 'Quantity' in working_df.columns and 'Total Spent' in working_df.columns:
@@ -301,7 +293,6 @@ if my_raw_file is not None:
                     working_df.loc[discrepancy_mask, 'Total Spent'] = calculated_spent.loc[discrepancy_mask]
             cleaning_progress.progress(70)
             
-            # Phase 4: Remaining Logic & Outliers
             status_text.text("📊 Applying IQR outlier logic and processing dates...")
             if fix_nulls:
                 numeric_fields = working_df.select_dtypes(include=['number']).columns
@@ -354,4 +345,36 @@ if my_raw_file is not None:
         memory_buffer = io.BytesIO()
         with pd.ExcelWriter(memory_buffer, engine='openpyxl') as excel_writer:
             working_df.to_excel(excel_writer, index=False, sheet_name='Cleaned Data Output')
-        st.download_button(label="📥 Download Clean Excel File", data=memory_buffer.getvalue(), file_name=f"cleaned_{my_raw_file.name}",
+        st.download_button(label="📥 Download Clean Excel File", data=memory_buffer.getvalue(), file_name=f"cleaned_{my_raw_file.name}", mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")
+
+# --- STEP 8: USER EXPERIENCE FEEDBACK HUB ---
+st.markdown("---")
+st.subheader("⭐ User Experience Feedback Hub")
+col1, col2 = st.columns([1, 1])
+
+with col1:
+    st.markdown("### Share Your Experience")
+    user_rating = st.slider("Rate the Data Janitor Engine (1 = Poor, 5 = Elite)", 1, 5, 5)
+    user_review = st.text_area("What features or adjustments would make this app better for your daily workflow?")
+    
+    if st.button("Submit Anonymous Feedback 🚀"):
+        if user_review.strip() != "":
+            timestamp = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+            log_entry = f"[{timestamp}] Rating: {user_rating}/5 | Feedback: {user_review}\n"
+            with open("user_feedback_vault.txt", "a") as vault_file:
+                vault_file.write(log_entry)
+            st.success("Thank you! Your recommendations have been safely transmitted directly to our engineering roadmap.")
+
+with col2:
+    st.markdown("### 🔒 Private Administrator Dashboard")
+    if has_full_access and login_user == "admin":
+        st.write("Welcome back, Admin. User reviews:")
+        if os.path.exists("user_feedback_vault.txt"):
+            with open("user_feedback_vault.txt", "r") as vault_file:
+                feedback_records = vault_file.readlines()
+            for record in reversed(feedback_records):
+                st.info(record)
+        else:
+            st.info("No feedback records logged.")
+    else:
+        st.info("🔒 Admin panel encrypted. Log in with Master Admin credentials to view core feedback data streams.")
