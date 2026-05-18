@@ -1,5 +1,6 @@
 import streamlit as st
 import pandas as pd
+import numpy as np
 import sqlite3
 import io
 import os
@@ -61,6 +62,68 @@ premium_vault = load_premium_keys()
 if 'current_logged_user' not in st.session_state:
     st.session_state.current_logged_user = None
 
+# --- PIPELINE MODULAR ADVANCED CLEANING ENGINE FUNCTIONS ---
+
+def clean_currency_and_strings(df, selected_columns=None):
+    """Safely strips currency symbols ONLY from financial vectors to prevent breaking general text."""
+    df_clean = df.copy()
+    if not selected_columns:
+        selected_columns = [col for col in df_clean.columns if any(x in col.lower() for x in ['price', 'spent', 'amount', 'cost'])]
+    
+    for col in selected_columns:
+        if col in df_clean.columns:
+            df_clean[col] = df_clean[col].astype(str).str.replace('R', '', regex=False)
+            df_clean[col] = df_clean[col].str.replace('$', '', regex=False).str.strip()
+            df_clean[col] = pd.to_numeric(df_clean[col], errors='coerce')
+            
+    for col in df_clean.select_dtypes(include=['object']).columns:
+        if not col.lower().endswith('id') and col not in selected_columns:
+            df_clean[col] = df_clean[col].astype(str).str.strip().str.title()
+            
+    return df_clean
+
+def clean_context_imputation(df):
+    """Computes empty entries using cross-column dependencies and enforces zero-bounds."""
+    df_clean = df.copy()
+    if all(c in df_clean.columns for c in ['Price Per Unit', 'Quantity', 'Total Spent']):
+        math_mask = df_clean['Total Spent'].isnull() & df_clean['Price Per Unit'].notnull() & df_clean['Quantity'].notnull()
+        df_clean.loc[math_mask, 'Total Spent'] = df_clean.loc[math_mask, 'Price Per Unit'] * df_clean.loc[math_mask, 'Quantity']
+        
+        for financial_col in ['Price Per Unit', 'Total Spent']:
+            if financial_col in df_clean.columns:
+                df_clean[financial_col] = df_clean[financial_col].clip(lower=0.0)
+            
+    if 'Item' in df_clean.columns and 'Category' in df_clean.columns:
+        item_mask = df_clean['Item'].isnull() & df_clean['Category'].notnull()
+        df_clean.loc[item_mask, 'Item'] = "Unspecified_" + df_clean.loc[item_mask, 'Category'].astype(str)
+        df_clean['Item'] = df_clean['Item'].fillna("Unspecified_UnknownCategory")
+        
+    return df_clean
+
+def display_visual_comparison(original_df, cleaned_df):
+    """Renders a side-by-side framework with highlighting showing modified rows."""
+    st.markdown("### 🔄 Delta Engine Validation View")
+    st.write("Review the differences below. Processed layout datasets are displayed side-by-side.")
+    
+    orig_sample = original_df.head(10).reset_index(drop=True)
+    clean_sample = cleaned_df.head(10).reset_index(drop=True)
+    
+    col_orig, col_clean = st.columns(2)
+    with col_orig:
+        st.markdown("**📋 Original Ingested Sample**")
+        st.dataframe(orig_sample)
+    with col_clean:
+        st.markdown("**✨ Cleaned Pipeline Output (Changes Highlighted)**")
+        try:
+            # Highlight cells where values have changed from the original input
+            styled_clean = clean_sample.style.apply(
+                lambda x: np.where(orig_sample != clean_sample, 'background-color: rgba(46, 204, 113, 0.25)', ''), 
+                axis=None
+            )
+            st.dataframe(styled_clean)
+        except:
+            st.dataframe(clean_sample)
+
 # --- STEP 1: GATEKEEPER & ACCESS CONTROL ---
 st.sidebar.header("🔑 App Access Control")
 user_tier = st.sidebar.radio("Your Current Tier", ["Free / Guest User", "Premium Member / Admin Login", "🌟 Register Custom Passkey"])
@@ -116,13 +179,13 @@ st.write("A customized Python data engine built to handle messy business spreads
 
 st.sidebar.markdown("---")
 st.sidebar.header("⚙️ Advanced Cleaning Suite")
-fix_nulls = st.sidebar.checkbox("Statistical Median Null Imputation")
-smart_impute = st.sidebar.checkbox("🧠 Context-Aware Math Imputation")
-purge_dupes = st.sidebar.checkbox("Remove Duplicate Transaction Rows")
-clean_strings = st.sidebar.checkbox("Strip Currency & Standardize Casing")
-math_validate = st.sidebar.checkbox("📐 Cross-Column Math Validation")
+fix_nulls = st.sidebar.checkbox("Statistical Median Null Imputation", value=True)
+smart_impute = st.sidebar.checkbox("🧠 Context-Aware Math Imputation", value=True)
+purge_dupes = st.sidebar.checkbox("Remove Duplicate Transaction Rows", value=True)
+clean_strings = st.sidebar.checkbox("Strip Currency & Standardize Casing", value=True)
+math_validate = st.sidebar.checkbox("📐 Cross-Column Math Validation", value=True)
 stat_outliers = st.sidebar.checkbox("📊 Statistical IQR Outlier Filtering")
-date_standard = st.sidebar.checkbox("📅 Smart Date Standardization")
+date_standard = st.sidebar.checkbox("📅 Smart Date Standardization", value=True)
 push_to_database = st.sidebar.checkbox("Index Clean Tables into Backend SQLite")
 
 my_raw_file = st.file_uploader("Drop your messy retail dataset here", type=["csv", "xlsx"])
@@ -151,6 +214,9 @@ if my_raw_file is not None:
     else:
         working_df = loaded_df.copy()
 
+    # Create a completely untouched anchor duplicate of original ingestion state to calculate delta highlights
+    working_df_original = working_df.copy()
+
     # --- AUTOMATED DATA HEALTH DIAGNOSTIC REPORT ---
     st.markdown("---")
     st.subheader("📊 Automated Data Health & Integrity Report")
@@ -170,11 +236,6 @@ if my_raw_file is not None:
     with metric_col4:
         st.metric(label="Duplicate Rows Found", value=total_duplicates, delta="- Action Required" if total_duplicates > 0 else "Clean", delta_color="inverse" if total_duplicates > 0 else "normal")
 
-    # Show Raw Data View
-    st.markdown("---")
-    st.subheader("📋 Ingested Dataset Overview")
-    st.dataframe(working_df.head(5))
-    
     # --- STEP 4: CUSTOM AI COMMAND CENTER ---
     st.markdown("---")
     st.subheader("🤖 Custom AI Command Center")
@@ -210,91 +271,69 @@ if my_raw_file is not None:
     if custom_message:
         st.info(custom_message)
 
-    # --- STEP 5: ADVANCED TRANSFORM CLEANING ENGINE ---
+    # --- STEP 5: AUTOMATED MODULAR PIPELINE EXECUTION WITH PROGRESS INDICATORS ---
+    st.markdown("---")
+    st.subheader("⚙️ Processing Engine Execution Log")
     
-    # 1. Context-Aware Math Imputation
-    if smart_impute:
-        # Intelligently calculate Total Spent if price and quantity exist rather than using arbitrary medians
-        if 'Price Per Unit' in working_df.columns and 'Quantity' in working_df.columns and 'Total Spent' in working_df.columns:
-            math_mask = working_df['Total Spent'].isnull() & working_df['Price Per Unit'].notnull() & working_df['Quantity'].notnull()
-            working_df.loc[math_mask, 'Total Spent'] = working_df.loc[math_mask, 'Price Per Unit'] * working_df.loc[math_mask, 'Quantity']
-        # Contextually handle descriptive text fields
-        if 'Item' in working_df.columns and 'Category' in working_df.columns:
-            working_df['Item'] = working_df['Item'].fillna("Unspecified_" + working_df['Category'].astype(str))
-        st.sidebar.success("🧠 Context-aware mathematical imputation complete.")
-
-    # 2. Standard Median Null Imputation (Fallback for remaining nulls)
-    if fix_nulls:
-        numeric_fields = working_df.select_dtypes(include=['number']).columns
-        for field in numeric_fields:
-            working_df[field] = working_df[field].fillna(working_df[field].median())
-        st.sidebar.success("✔️ Remaining empty fields filled using statistical medians.")
+    if st.button("⚡ Run Industrial Clean Engines"):
+        cleaning_progress = st.progress(0)
+        status_text = st.empty()
         
-    # 3. Duplicate Purge
-    if purge_dupes:
-        rows_before = len(working_df)
-        working_df = working_df.drop_duplicates()
-        rows_after = len(working_df)
-        st.sidebar.success(f"✔️ Flushed {rows_before - rows_after} duplicate transactional rows.")
-        
-    # 4. Cross-Column Math Validation & Discrepancy Auditing
-    if math_validate:
-        if 'Price Per Unit' in working_df.columns and 'Quantity' in working_df.columns and 'Total Spent' in working_df.columns:
-            calculated_spent = working_df['Price Per Unit'] * working_df['Quantity']
-            discrepancy_mask = (working_df['Total Spent'] - calculated_spent).abs() > 0.01
-            discrepancy_count = discrepancy_mask.sum()
-            if discrepancy_count > 0:
-                working_df.loc[discrepancy_mask, 'Total Spent'] = calculated_spent.loc[discrepancy_mask]
-                st.sidebar.warning(f"📐 Adjusted {discrepancy_count} cross-column auditing errors.")
-            else:
-                st.sidebar.success("📐 Accounting check: 100% Cross-column validation passed!")
-
-    # 5. Statistical IQR Outlier Filtering
-    if stat_outliers:
-        numeric_fields = working_df.select_dtypes(include=['number']).columns
-        total_outliers_purged = 0
-        for field in numeric_fields:
-            q1 = working_df[field].quantile(0.25)
-            q3 = working_df[field].quantile(0.75)
-            iqr = q3 - q1
-            lower_fence = q1 - 1.5 * iqr
-            upper_fence = q3 + 1.5 * iqr
+        try:
+            # Phase 1: Currency Processing
+            status_text.text("🧼 Isolating and scrubbing mixed currency formats...")
+            if clean_strings:
+                working_df = clean_currency_and_strings(working_df)
+            cleaning_progress.progress(25)
             
-            before_filter = len(working_df)
-            working_df = working_df[(working_df[field] >= lower_fence) & (working_df[field] <= upper_fence)]
-            total_outliers_purged += (before_filter - len(working_df))
-        st.sidebar.success(f"📊 IQR Filter: Purged {total_outliers_purged} extreme data anomalies.")
+            # Phase 2: Context Mathematical Alignments
+            status_text.text("🧠 Re-calculating empty metrics and enforcing non-negative boundaries...")
+            if smart_impute:
+                working_df = clean_context_imputation(working_df)
+            cleaning_progress.progress(50)
+            
+            # Phase 3: Cross-Column Math Checks
+            status_text.text("📐 Executing financial cross-column audits...")
+            if math_validate:
+                if 'Price Per Unit' in working_df.columns and 'Quantity' in working_df.columns and 'Total Spent' in working_df.columns:
+                    calculated_spent = working_df['Price Per Unit'] * working_df['Quantity']
+                    discrepancy_mask = (working_df['Total Spent'] - calculated_spent).abs() > 0.01
+                    working_df.loc[discrepancy_mask, 'Total Spent'] = calculated_spent.loc[discrepancy_mask]
+            cleaning_progress.progress(70)
+            
+            # Phase 4: Remaining Logic & Outliers
+            status_text.text("📊 Applying IQR outlier logic and processing dates...")
+            if fix_nulls:
+                numeric_fields = working_df.select_dtypes(include=['number']).columns
+                for field in numeric_fields:
+                    working_df[field] = working_df[field].fillna(working_df[field].median())
+            
+            if purge_dupes:
+                working_df = working_df.drop_duplicates()
+                
+            if stat_outliers:
+                numeric_fields = working_df.select_dtypes(include=['number']).columns
+                for field in numeric_fields:
+                    q1 = working_df[field].quantile(0.25)
+                    q3 = working_df[field].quantile(0.75)
+                    iqr = q3 - q1
+                    working_df = working_df[(working_df[field] >= (q1 - 1.5 * iqr)) & (working_df[field] <= (q3 + 1.5 * iqr))]
+                    
+            if date_standard:
+                for field in working_df.columns:
+                    if 'date' in field.lower() or 'time' in field.lower():
+                        working_df[field] = pd.to_datetime(working_df[field], errors='coerce').dt.strftime('%Y-%m-%d')
+            
+            cleaning_progress.progress(100)
+            status_text.success("✨ Industrial scrubbing pipeline executed successfully with 0 exceptions!")
+            
+        except Exception as pipeline_error:
+            st.error(f"❌ Critical Exception during processing step: {pipeline_error}")
 
-    # 6. Smart Date Standardization
-    if date_standard:
-        for field in working_df.columns:
-            if 'date' in field.lower() or 'time' in field.lower():
-                try:
-                    working_df[field] = pd.to_datetime(working_df[field], errors='coerce').dt.strftime('%Y-%m-%d')
-                    st.sidebar.success(f"📅 Standardized `{field}` to YYYY-MM-DD format.")
-                except:
-                    pass
-
-    # 7. Formatting & Fuzzy Inconsistent Categorical Matching
-    if clean_strings:
-        for field in working_df.columns:
-            if working_df[field].dtype == 'object':
-                # Strip symbols but preserve structural string tracking codes (preserving leading zeros)
-                if not field.lower().endswith('id'):
-                    working_df[field] = working_df[field].astype(str).str.replace('R', '', regex=False).str.replace('$', '', regex=False).str.strip()
-                try:
-                    # Only convert to numeric if it doesn't represent an analytical string identity
-                    if not field.lower().endswith('id'):
-                        working_df[field] = pd.to_numeric(working_df[field])
-                except:
-                    if not instruction_applied:
-                        # Normalize categorical values ("Credit Card" vs "creditcard" standardizations)
-                        working_df[field] = working_df[field].str.strip().str.title()
-        st.sidebar.success("✔️ Inconsistent string mapping standardizations updated.")
-        
-    st.subheader("✨ Transformed Engine Preview")
-    st.dataframe(working_df.head(10))
+    # --- VISUAL COMPARISON INTERFACE ---
+    display_visual_comparison(working_df_original, working_df)
     
+    # --- STEP 6: SQL BACKEND INDEXING ---
     if push_to_database:
         try:
             db_connection = sqlite3.connect("retail_analytics.db")
@@ -304,6 +343,7 @@ if my_raw_file is not None:
         except Exception as database_error:
             st.sidebar.error(f"Database Exception: {database_error}")
 
+    # --- STEP 7: SECURE SPREADSHEET EXPORT ENGINE ---
     st.markdown("---")
     st.subheader("💾 Export Clean Dataset")
     
@@ -314,36 +354,4 @@ if my_raw_file is not None:
         memory_buffer = io.BytesIO()
         with pd.ExcelWriter(memory_buffer, engine='openpyxl') as excel_writer:
             working_df.to_excel(excel_writer, index=False, sheet_name='Cleaned Data Output')
-        st.download_button(label="📥 Download Clean Excel File", data=memory_buffer.getvalue(), file_name=f"cleaned_{my_raw_file.name}", mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")
-
-# --- STEP 6: USER EXPERIENCE FEEDBACK HUB ---
-st.markdown("---")
-st.subheader("⭐ User Experience Feedback Hub")
-col1, col2 = st.columns([1, 1])
-
-with col1:
-    st.markdown("### Share Your Experience")
-    user_rating = st.slider("Rate the Data Janitor Engine (1 = Poor, 5 = Elite)", 1, 5, 5)
-    user_review = st.text_area("What features or adjustments would make this app better for your daily workflow?")
-    
-    if st.button("Submit Anonymous Feedback 🚀"):
-        if user_review.strip() != "":
-            timestamp = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-            log_entry = f"[{timestamp}] Rating: {user_rating}/5 | Feedback: {user_review}\n"
-            with open("user_feedback_vault.txt", "a") as vault_file:
-                vault_file.write(log_entry)
-            st.success("Thank you! Your recommendations have been safely transmitted directly to our engineering roadmap.")
-
-with col2:
-    st.markdown("### 🔒 Private Administrator Dashboard")
-    if has_full_access and login_user == "admin":
-        st.write("Welcome back, Admin. User reviews:")
-        if os.path.exists("user_feedback_vault.txt"):
-            with open("user_feedback_vault.txt", "r") as vault_file:
-                feedback_records = vault_file.readlines()
-            for record in reversed(feedback_records):
-                st.info(record)
-        else:
-            st.info("No feedback records logged.")
-    else:
-        st.info("🔒 Admin panel encrypted. Log in with Master Admin credentials to view core feedback data streams.")
+        st.download_button(label="📥 Download Clean Excel File", data=memory_buffer.getvalue(), file_name=f"cleaned_{my_raw_file.name}",
