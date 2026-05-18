@@ -7,29 +7,53 @@ import os
 import datetime
 import json
 import re
+import hashlib
 
 # Premium UI Configuration
-st.set_page_config(page_title="Polymorphic Meta-Engine v2.0", page_icon="🧬", layout="wide")
+st.set_page_config(page_title="Data Janitor Pro Meta-Engine", page_icon="🧬", layout="wide")
 
-# --- APP ACCESS CONTROL & SESSION TRACKING ---
-USER_DB_FILE = "premium_users_vault.json"
+# Initialize Session-Based Audit Ledger & State
+if 'audit_log' not in st.session_state:
+    st.session_state.audit_log = []
+if 'current_logged_user' not in st.session_state:
+    st.session_state.current_logged_user = None
+
+def log_audit_event(action_summary, details=""):
+    """Tracks every structural modification for legal reproducibility and auditing."""
+    timestamp = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    st.session_state.audit_log.append({
+        "timestamp": timestamp,
+        "action": action_summary,
+        "details": details
+    })
+
+# --- CRYPTOGRAPHIC SECURITY LAYER ---
+USER_DB_FILE = "secure_user_vault.json"
 SESSION_LOG_FILE = "active_sessions_tracker.json"
 
-def load_premium_keys():
-    default_vault = {"admin": "123Shelby@"}
+# Default Master Admin credential hash (SHA-256 hash of "123Shelby@")
+DEFAULT_ADMIN_HASH = "26777aad87c7342827e73f9aa735b5fcbc54d52651a95a9cf3e314222f0ff73c"
+# Default Invitation Code verification hash (SHA-256 hash of "123Shelby@")
+DEFAULT_INVITE_HASH = "26777aad87c7342827e73f9aa735b5fcbc54d52651a95a9cf3e314222f0ff73c"
+
+def hash_passkey(passkey):
+    return hashlib.sha256(passkey.strip().encode('utf-8')).hexdigest()
+
+def load_secure_vault():
     if not os.path.exists(USER_DB_FILE):
+        initial_vault = {"admin": DEFAULT_ADMIN_HASH}
         with open(USER_DB_FILE, "w") as f:
-            json.dump(default_vault, f)
-        return default_vault
+            json.dump(initial_vault, f)
+        return initial_vault
     try:
         with open(USER_DB_FILE, "r") as f:
             return json.load(f)
     except:
-        return default_vault
+        return {"admin": DEFAULT_ADMIN_HASH}
 
-def save_premium_key(username, new_password):
-    vault = load_premium_keys()
-    vault[username.lower().strip()] = new_password.strip()
+def register_secure_user(username, password):
+    vault = load_secure_vault()
+    vault[username.lower().strip()] = hash_passkey(password)
     with open(USER_DB_FILE, "w") as f:
         json.dump(vault, f)
 
@@ -55,61 +79,44 @@ def track_active_session(username, action="login"):
         json.dump(sessions, f)
     return True
 
-premium_vault = load_premium_keys()
-if 'current_logged_user' not in st.session_state:
-    st.session_state.current_logged_user = None
+secure_vault = load_secure_vault()
 
 # --- CORE POLYMORPHIC DATA PROCESSING ENGINE ---
 
 def profile_semantic_types(df):
-    """
-    Phase 1: Analyzes data distributions to deduce column intent without relying on column names.
-    Returns a dictionary mapping column names to their discovered semantic category.
-    """
+    """Phase 1: Analyzes data distributions to deduce column intent dynamically."""
     profiles = {}
     for col in df.columns:
-        # Cast a sample to string for regex checks
         sample_str = df[col].dropna().head(100).astype(str).str.strip()
         if sample_str.empty:
             profiles[col] = "empty"
             continue
             
-        # Check for Date/Time signatures
         date_hits = sample_str.apply(lambda x: 1 if re.match(r'^\d{4}[-/]\d{2}[-/]\d{2}', x) or re.search(r'\d{2}/', x) else 0).sum()
         if date_hits / len(sample_str) > 0.5:
             profiles[col] = "date"
             continue
 
-        # Check for mixed currency string noise
         currency_hits = sample_str.apply(lambda x: 1 if any(symbol in x for symbol in ['R', '$', '€', '£']) else 0).sum()
-        
-        # Coerce column to see if it's fundamentally numerical
-        numeric_coerced = pd.to_numeric(df[col].astype(str).str.replace(r'[R\$\s,]', '', regex=True), errors='coerce')
+        numeric_coerced = pd.to_numeric(df[col].astype(str).str.replace(r'[R\$\s,€£]', '', regex=True), errors='coerce')
         valid_numeric_ratio = numeric_coerced.notnull().sum() / len(df[col])
         
         if valid_numeric_ratio > 0.6 or currency_hits / len(sample_str) > 0.3:
             profiles[col] = "numeric"
             continue
             
-        # Differentiate between unique relational system codes and descriptive text fields
         unique_ratio = df[col].nunique() / len(df[col]) if len(df[col]) > 0 else 0
         if unique_ratio > 0.8 and any(token in col.lower() for token in ['id', 'key', 'code', 'pk']):
             profiles[col] = "system_key"
         else:
             profiles[col] = "categorical_text"
-            
     return profiles
 
 def discover_algebraic_identities(df, numeric_columns):
-    """
-    Phase 2: Runs programmatic permutations across all numerical vectors to find linear equations.
-    Deduces relationships like: Col_A * Col_B = Col_C or Col_A + Col_B = Col_C
-    """
+    """Phase 2: Scans programmatic permutations across numeric axes to map identities."""
     identities = []
     if len(numeric_columns) < 3:
         return identities
-
-    # Sample non-null validation rows to test integrity formulas
     test_df = df[numeric_columns].dropna().head(500)
     if len(test_df) < 5:
         return identities
@@ -120,38 +127,31 @@ def discover_algebraic_identities(df, numeric_columns):
             if i == j: continue
             for k in range(len(cols)):
                 if k == i or k == j: continue
-                
                 A, B, C = test_df[cols[i]], test_df[cols[j]], test_df[cols[k]]
-                
-                # Test Multiplicative Rule: A * B == C
                 if np.allclose(A * B, C, rtol=1e-2, atol=1e-2):
                     identities.append(('multiply', cols[i], cols[j], cols[k]))
-                    return identities # Return earliest complete matching matrix rule
-                # Test Additive Rule: A + B == C
+                    return identities
                 if np.allclose(A + B, C, rtol=1e-2, atol=1e-2):
                     identities.append(('add', cols[i], cols[j], cols[k]))
                     return identities
     return identities
 
 def execute_polymorphic_cleaning(df, config_flags):
-    """
-    Executes universal parsing optimizations driven completely by semantic layout logic.
-    """
+    """Executes universal parsing optimizations driven completely by semantic layout logic."""
     df_clean = df.copy()
     semantic_map = profile_semantic_types(df_clean)
     
-    # Identify localized sub-vectors
     numeric_cols = [c for c, t in semantic_map.items() if t == "numeric"]
     text_cols = [c for c, t in semantic_map.items() if t == "categorical_text"]
     date_cols = [c for c, t in semantic_map.items() if t == "date"]
 
-    # 1. Strip currency and non-numeric artifacts safely
+    # 1. Clean String & Currency Formats
     if config_flags['clean_strings']:
         for col in numeric_cols:
             df_clean[col] = df_clean[col].astype(str).str.replace(r'[R\$\s,€£]', '', regex=True)
             df_clean[col] = pd.to_numeric(df_clean[col], errors='coerce')
+        log_audit_event("Scrubbed Text Noise from Numeric Classes", f"Targeted: {numeric_cols}")
 
-        # Human-Readable Optimization Loop for encoded system tokens (e.g., Item_10_PAT -> Item 10)
         for col in text_cols:
             if df_clean[col].astype(str).str.contains('_').sum() / len(df_clean) > 0.4:
                 df_clean[col] = df_clean[col].astype(str).str.replace('_', ' ', regex=False)
@@ -160,44 +160,65 @@ def execute_polymorphic_cleaning(df, config_flags):
                 except:
                     pass
             df_clean[col] = df_clean[col].astype(str).str.strip().str.title()
+        log_audit_event("Standardized Nominal Text Fields to Human-Readable Format")
 
-    # 2. Dynamic Identity Discovery and Algebraic Imputation Loop
+    # 2. Dynamic Algebraic Imputation Loop
     if config_flags['smart_impute'] and len(numeric_cols) >= 3:
         rules = discover_algebraic_identities(df_clean, numeric_cols)
         for rule_type, colA, colB, colC in rules:
             if rule_type == 'multiply':
-                # Reconstruct C (Total)
                 mask_c = df_clean[colC].isnull() & df_clean[colA].notnull() & df_clean[colB].notnull()
                 df_clean.loc[mask_c, colC] = df_clean.loc[mask_c, colA] * df_clean.loc[mask_c, colB]
-                # Reconstruct A (Price)
+                
                 mask_a = df_clean[colA].isnull() & df_clean[colC].notnull() & df_clean[colB].notnull() & (df_clean[colB] > 0)
                 df_clean.loc[mask_a, colA] = df_clean.loc[mask_a, colC] / df_clean.loc[mask_a, colB]
-                # Reconstruct B (Quantity)
+                
                 mask_b = df_clean[colB].isnull() & df_clean[colC].notnull() & df_clean[colA].notnull() & (df_clean[colA] > 0)
                 df_clean.loc[mask_b, colB] = df_clean.loc[mask_b, colC] / df_clean.loc[mask_b, colA]
+                
+                log_audit_event("Algebraic Imputation Triggered", f"Applied Multiplicative Rule Matrix: {colA} * {colB} = {colC}")
 
-    # 3. Handle remaining null records using statistical metrics
+    # 3. Statistical IQR Outlier Filtering Engine
+    if config_flags['stat_outliers']:
+        initial_count = len(df_clean)
+        for col in numeric_cols:
+            q1 = df_clean[col].quantile(0.25)
+            q3 = df_clean[col].quantile(0.75)
+            iqr = q3 - q1
+            lower_bound = q1 - 1.5 * iqr
+            upper_bound = q3 + 1.5 * iqr
+            df_clean = df_clean[(df_clean[col] >= lower_bound) & (df_clean[col] <= upper_bound)]
+        dropped_rows = initial_count - len(df_clean)
+        log_audit_event("Statistical Outlier Filtering", f"Purged {dropped_rows} anomaly vectors violating 1.5 IQR bounds.")
+
+    # 4. Handle remaining null records via population medians
     if config_flags['fix_nulls']:
         for col in numeric_cols:
-            df_clean[col] = df_clean[col].fillna(df_clean[col].median())
+            null_count = int(df_clean[col].isnull().sum())
+            if null_count > 0:
+                df_clean[col] = df_clean[col].fillna(df_clean[col].median())
+                log_audit_event("Median Imputation Execution", f"Imputed {null_count} nulls in numeric column: `{col}`")
         for col in text_cols:
-            df_clean[col] = df_clean[col].replace(['Nan', 'None', 'Null', ''], np.nan)
-            df_clean[col] = df_clean[col].fillna("Unspecified Field")
+            df_clean[col] = df_clean[col].replace(['Nan', 'None', 'Null', ''], np.nan).fillna("Unspecified Field")
 
-    # 4. Standardize any field discovered to be a date vector
+    # 5. Standardize Dates
     if config_flags['date_standard']:
         for col in date_cols:
             df_clean[col] = pd.to_datetime(df_clean[col], errors='coerce').dt.strftime('%Y-%m-%d')
+        log_audit_event("Chronological Metric Standardization", f"Formatted columns: {date_cols}")
 
-    # 5. Drop duplicate historical profiles
+    # 6. Drop Duplicates
     if config_flags['purge_dupes']:
+        dupe_count = int(df_clean.duplicated().sum())
         df_clean = df_clean.drop_duplicates()
+        if dupe_count > 0:
+            log_audit_event("Deduplication Sweep", f"Removed {dupe_count} duplicate row vectors.")
 
     return df_clean
 
-# --- GATEKEEPER SIDEBAR INTERFACE ---
-st.sidebar.header("🔑 Engine Access Validation")
-user_tier = st.sidebar.radio("Authorization Status", ["Free / Guest User", "Premium Member / Admin Login", "🌟 Register Custom Passkey"])
+# --- USER INTERFACE ACCESS SYSTEM ---
+st.sidebar.header("🔑 Cryptographic Authentication")
+user_tier = st.sidebar.radio("Authorization Node", ["Free / Guest User", "Premium Member / Admin Login", "🌟 Register Secure Passkey"])
 
 has_full_access = False
 
@@ -207,48 +228,50 @@ if user_tier == "Free / Guest User":
         st.session_state.current_logged_user = None
     st.sidebar.info("ℹ️ Free tier limited to maximum 60 rows × 60 columns processing slice.")
 
-elif user_tier == "🌟 Register Custom Passkey":
+elif user_tier == "🌟 Register Secure Passkey":
     reg_user = st.sidebar.text_input("Choose Username")
-    reg_pass = st.sidebar.text_input("Create Custom Passkey", type="password")
-    invite_code = st.sidebar.text_input("Verification Code", type="password")
-    if st.sidebar.button("Register Engine Access Key 🚀"):
-        if invite_code == "123Shelby@":
+    reg_pass = st.sidebar.text_input("Create Private Passkey", type="password")
+    invite_code = st.sidebar.text_input("Enterprise Verification Pass", type="password")
+    if st.sidebar.button("Register Key Node 🚀"):
+        if hash_passkey(invite_code) == DEFAULT_INVITE_HASH:
             if reg_user.strip() and reg_pass.strip():
-                save_premium_key(reg_user, reg_pass)
-                st.sidebar.success("✔️ Key registered! Select 'Premium Member Login' to verify.")
+                register_secure_user(reg_user, reg_pass)
+                st.sidebar.success("✔️ Cryptographic signature saved. Proceed to Login.")
             else:
-                st.sidebar.error("❌ Credentials cannot be empty.")
+                st.sidebar.error("❌ Fields cannot be empty.")
         else:
-            st.sidebar.error("❌ Verification failed.")
+            st.sidebar.error("❌ Verification failed: Unauthorized invitation code signature.")
 
 elif user_tier == "Premium Member / Admin Login":
     login_user = st.sidebar.text_input("Username").lower().strip()
     login_pass = st.sidebar.text_input("Enter Passkey", type="password")
     if login_user and login_pass:
-        if login_user in premium_vault and premium_vault[login_user] == login_pass:
+        hashed_input = hash_passkey(login_pass)
+        if login_user in secure_vault and secure_vault[login_user] == hashed_input:
             if st.session_state.current_logged_user == login_user:
                 has_full_access = True
-                st.sidebar.success(f"🔥 Welcome back {login_user.title()}! Access granted.")
+                st.sidebar.success(f"🔥 Secure Node Active: Welcome back, {login_user.title()}.")
             else:
                 if track_active_session(login_user, action="login"):
                     st.session_state.current_logged_user = login_user
                     has_full_access = True
-                    st.sidebar.success(f"🔥 Success! Logged in as {login_user.title()}.")
+                    st.sidebar.success(f"🔥 Session Authenticated: Welcome, {login_user.title()}.")
                 else:
-                    st.sidebar.error("🚨 Active Session Blocked: Session running elsewhere.")
+                    st.sidebar.error("🚨 Collision Block: Account session active on another device node.")
         else:
             if login_pass != "":
-                st.sidebar.error("❌ Invalid authorization key.")
+                st.sidebar.error("❌ Security Violation: Invalid signature credentials.")
 
-# --- MAIN DASHBOARD WINDOW ---
-st.title("🧬 Autonomous Polymorphic Meta-Engine")
-st.write("An advanced self-correcting ingestion framework built to automatically profile, audit, and clean unstructured tables.")
+# --- MAIN ENGINE CONTROL LAYER ---
+st.title("🧬 Advanced Polymorphic Meta-Engine & Reproducibility Suite")
+st.write("An autonomous, self-correcting data cleaning engine that logs, audits, and normalizes unstructured files.")
 
 st.sidebar.markdown("---")
-st.sidebar.header("⚙️ Meta-Pipeline Settings")
+st.sidebar.header("⚙️ Meta-Pipeline Directives")
 flags = {
     'fix_nulls': st.sidebar.checkbox("Statistical Median Null Imputation", value=True),
     'smart_impute': st.sidebar.checkbox("🧠 Polymorphic Identity Extraction", value=True),
+    'stat_outliers': st.sidebar.checkbox("📊 Statistical IQR Outlier Purge", value=True),
     'purge_dupes': st.sidebar.checkbox("Purge Redundant Matrix Profiles", value=True),
     'clean_strings': st.sidebar.checkbox("Strip Currency Noise & Standardize Text", value=True),
     'date_standard': st.sidebar.checkbox("📅 Smart Chronological Formatter", value=True)
@@ -268,7 +291,7 @@ if my_raw_file is not None:
     total_rows, total_cols = len(loaded_df), len(loaded_df.columns)
     
     if not has_full_access and (total_rows > 60 or total_cols > 60):
-        st.warning(f"⚠️ **Free Tier Slicer Triggered!** File size restricted down from {total_rows}x{total_cols} to 60x60 constraints.")
+        st.warning(f"⚠️ **Free Tier Slicer Active:** Structural view capped down to 60x60 dimensions.")
         working_df = loaded_df.iloc[:min(total_rows, 60), :min(total_cols, 60)].copy()
     else:
         working_df = loaded_df.copy()
@@ -281,8 +304,8 @@ if my_raw_file is not None:
     m1, m2, m3, m4 = st.columns(4)
     m1.metric("Rows Processed", len(working_df))
     m2.metric("Columns Mapped", len(working_df.columns))
-    m3.metric("Discovered Missing Cells", int(working_df.isnull().sum().sum()))
-    m4.metric("Discovered Redundant Duplicates", int(working_df.duplicated().sum()))
+    m3.metric("Missing Cell Points", int(working_df.isnull().sum().sum()))
+    m4.metric("Redundant Duplicates", int(working_df.duplicated().sum()))
 
     # Processing Core Action
     st.markdown("---")
@@ -291,10 +314,13 @@ if my_raw_file is not None:
         prog = st.progress(0)
         log_txt = st.empty()
         
-        log_txt.text("Phase 1: Running heuristic vector token scanning...")
+        st.session_state.audit_log = [] # Clear history on fresh execution
+        log_audit_event("Ingested File Instance", f"Filename: {my_raw_file.name} | Dimensions: {total_rows}x{total_cols}")
+        
+        log_txt.text("Phase 1: Running semantic heuristic vector scans...")
         prog.progress(30)
         
-        log_txt.text("Phase 2: Calculating algebraic relationship correlation arrays...")
+        log_txt.text("Phase 2: Calculating algebraic permutation matrices...")
         prog.progress(60)
         
         try:
@@ -325,21 +351,28 @@ if my_raw_file is not None:
             conn = sqlite3.connect("universal_analytics.db")
             working_df.to_sql("sanitized_ledger", conn, if_exists="replace", index=False)
             conn.close()
-            st.sidebar.info("🚀 Indexed into local SQLite.")
+            st.sidebar.info("🚀 Indexed into local SQLite database.")
         except Exception as dbe:
             st.sidebar.error(f"Database Exception: {dbe}")
 
     st.markdown("---")
-    st.subheader("💾 Export Sanitized Frame")
-    if is_csv:
-        st.download_button("📥 Download Universal Clean CSV", data=working_df.to_csv(index=False).encode('utf-8'), file_name=f"sanitized_{my_raw_file.name}", mime="text/csv")
-    else:
-        buf = io.BytesIO()
-        with pd.ExcelWriter(buf, engine='openpyxl') as w:
-            working_df.to_excel(w, index=False, sheet_name='Sanitized Frame')
-        st.download_button("📥 Download Universal Clean Excel", data=buf.getvalue(), file_name=f"sanitized_{my_raw_file.name}", mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")
+    st.subheader("💾 Production Export Center")
+    ex1, ex2 = st.columns(2)
+    with ex1:
+        st.markdown("#### 📊 Dataset Asset")
+        if is_csv:
+            st.download_button("📥 Download Universal Clean CSV", data=working_df.to_csv(index=False).encode('utf-8'), file_name=f"sanitized_{my_raw_file.name}", mime="text/csv")
+        else:
+            buf = io.BytesIO()
+            with pd.ExcelWriter(buf, engine='openpyxl') as w:
+                working_df.to_excel(w, index=False, sheet_name='Sanitized Frame')
+            st.download_button("📥 Download Universal Clean Excel", data=buf.getvalue(), file_name=f"sanitized_{my_raw_file.name}", mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")
+    with ex2:
+        st.markdown("#### 📜 Transparency Audit Trail")
+        audit_json = json.dumps(st.session_state.audit_log, indent=2)
+        st.download_button("📥 Download Reproducible Audit Log (.json)", data=audit_json, file_name=f"audit_trail_{datetime.date.today()}.json", mime="application/json")
 
-# Feedback Terminal Block
+# System Feedback Terminal Block
 st.markdown("---")
 st.subheader("⭐ System Feedback Terminal")
 fa, fb = st.columns(2)
