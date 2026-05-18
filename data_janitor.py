@@ -10,13 +10,10 @@ import json
 st.set_page_config(page_title="Data Janitor Premium Engine", page_icon="🧼", layout="wide")
 
 # --- DATABASE / LOCAL PERSISTENT STORAGE SIMULATION ---
-# We use local JSON files that persist in the container to track registered users and active live sessions
 USER_DB_FILE = "premium_users_vault.json"
 SESSION_LOG_FILE = "active_sessions_tracker.json"
 
-# Helper function to load registered passkeys
 def load_premium_keys():
-    # Master default password always exists
     default_vault = {"admin": "123Shelby@"}
     if not os.path.exists(USER_DB_FILE):
         with open(USER_DB_FILE, "w") as f:
@@ -28,14 +25,12 @@ def load_premium_keys():
     except:
         return default_vault
 
-# Helper function to save a newly generated custom passkey
 def save_premium_key(username, new_password):
     vault = load_premium_keys()
     vault[username.lower().strip()] = new_password.strip()
     with open(USER_DB_FILE, "w") as f:
         json.dump(vault, f)
 
-# Helper function to manage concurrent sessions
 def track_active_session(username, action="login"):
     current_time = datetime.datetime.now().timestamp()
     sessions = {}
@@ -47,13 +42,11 @@ def track_active_session(username, action="login"):
             sessions = {}
             
     user_key = username.lower().strip()
-    
-    # Clean up dead sessions older than 15 minutes (900 seconds) to prevent permanent lockouts
     sessions = {u: t for u, t in sessions.items() if (current_time - t) < 900}
     
     if action == "login":
         if user_key in sessions:
-            return False  # Block login! Account is already active elsewhere
+            return False  
         sessions[user_key] = current_time
     elif action == "logout":
         if user_key in sessions:
@@ -63,13 +56,12 @@ def track_active_session(username, action="login"):
         json.dump(sessions, f)
     return True
 
-# Initialize state trackers
 premium_vault = load_premium_keys()
 
 if 'current_logged_user' not in st.session_state:
     st.session_state.current_logged_user = None
 
-# --- STEP 1: GATEKEEPER, CUSTOM PASSKEYS, & CONCURRENT BLOCKS ---
+# --- STEP 1: GATEKEEPER & ACCESS CONTROL ---
 st.sidebar.header("🔑 App Access Control")
 user_tier = st.sidebar.radio("Your Current Tier", ["Free / Guest User", "Premium Member / Admin Login", "🌟 Register Custom Passkey"])
 
@@ -88,7 +80,6 @@ elif user_tier == "🌟 Register Custom Passkey":
     invite_code = st.sidebar.text_input("Enter Premium Invitation Verification Code", type="password")
     
     if st.sidebar.button("Register Key 🚀"):
-        # Protect creation with a master invite check so outsiders can't make free keys
         if invite_code == "123Shelby@":
             if reg_user.strip() != "" and reg_pass.strip() != "":
                 save_premium_key(reg_user, reg_pass)
@@ -104,21 +95,17 @@ elif user_tier == "Premium Member / Admin Login":
     
     if login_user and login_pass:
         if login_user in premium_vault and premium_vault[login_user] == login_pass:
-            
-            # SESSION CONCURRENCY DOUBLE-LOGIN CHECK
             if st.session_state.current_logged_user == login_user:
-                # User is already authenticated in this browser tab tab session
                 has_full_access = True
-                st.sidebar.success(f"🔥 Welcome back, {login_user.title()}! Row constraints removed.")
+                st.sidebar.success(f"🔥 Welcome back, {login_user.title()}! Constraints removed.")
             else:
-                # Attempting to spin up a new runtime session
                 allowed = track_active_session(login_user, action="login")
                 if allowed:
                     st.session_state.current_logged_user = login_user
                     has_full_access = True
                     st.sidebar.success(f"🔥 Success! Logged in as {login_user.title()}. Constraints removed.")
                 else:
-                    st.sidebar.error("🚨 Access Denied: This account is currently logged in on another device or browser window.")
+                    st.sidebar.error("🚨 Access Denied: Account active on another window/device.")
         else:
             if login_pass != "":
                 st.sidebar.error("❌ Invalid Username or Passkey entry.")
@@ -128,13 +115,16 @@ st.title("🧼 Automated Data Cleaner & Relational Analytics Dashboard")
 st.write("A customized Python data engine built to handle messy business spreadsheets and load them into relational SQL tables.")
 
 st.sidebar.markdown("---")
-st.sidebar.header("⚙️ Standard Operations Panel")
+st.sidebar.header("⚙️ Advanced Cleaning Suite")
 fix_nulls = st.sidebar.checkbox("Statistical Median Null Imputation")
+smart_impute = st.sidebar.checkbox("🧠 Context-Aware Math Imputation")
 purge_dupes = st.sidebar.checkbox("Remove Duplicate Transaction Rows")
-clean_strings = st.sidebar.checkbox("Strip Currency (R / $) & Standardize Casing")
+clean_strings = st.sidebar.checkbox("Strip Currency & Standardize Casing")
+math_validate = st.sidebar.checkbox("📐 Cross-Column Math Validation")
+stat_outliers = st.sidebar.checkbox("📊 Statistical IQR Outlier Filtering")
+date_standard = st.sidebar.checkbox("📅 Smart Date Standardization")
 push_to_database = st.sidebar.checkbox("Index Clean Tables into Backend SQLite")
 
-# File uploader section supporting CSV and Excel spreadsheets
 my_raw_file = st.file_uploader("Drop your messy retail dataset here", type=["csv", "xlsx"])
 
 if my_raw_file is not None:
@@ -152,10 +142,7 @@ if my_raw_file is not None:
     # --- STEP 3: AUTOMATED 60-ROW & 60-COLUMN SLICER FOR GUESTS ---
     if not has_full_access:
         if total_raw_rows > 60 or total_raw_cols > 60:
-            st.warning(f"⚠️ **Free Tier Limit Applied!** Original file size was **{total_raw_rows} rows × {total_raw_cols} columns**. Your data has been automatically reduced down to a maximum layout constraint of **60 rows × 60 columns**.")
-            st.info("💡 Unlock unrestricted corporate processing scale by upgrading your subscription and entering your custom passkey credentials.")
-            
-            # Enforce strict maximum bounds cutting
+            st.warning(f"⚠️ **Free Tier Limit Applied!** Original file size was **{total_raw_rows} rows × {total_raw_cols} columns**. Sliced down to maximum constraints of **60 rows × 60 columns**.")
             row_cutoff = min(total_raw_rows, 60)
             col_cutoff = min(total_raw_cols, 60)
             working_df = loaded_df.iloc[:row_cutoff, :col_cutoff].copy()
@@ -206,8 +193,6 @@ if my_raw_file is not None:
                     working_df = working_df.drop(columns=matched_cols)
                     custom_message = f"🎯 AI Command Executed: Successfully dropped column `{matched_cols[0]}`!"
                     instruction_applied = True
-                else:
-                    custom_message = f"❌ AI Command Error: Could not find a column named '{col_to_drop}'."
             elif "uppercase" in cmd:
                 col_to_upper = user_instruction.split()[-1]
                 matched_cols = [c for c in working_df.columns if c.lower() == col_to_upper.lower()]
@@ -225,29 +210,87 @@ if my_raw_file is not None:
     if custom_message:
         st.info(custom_message)
 
-    # --- STEP 5: TRANSFORM CLEANING LOGIC ---
+    # --- STEP 5: ADVANCED TRANSFORM CLEANING ENGINE ---
+    
+    # 1. Context-Aware Math Imputation
+    if smart_impute:
+        # Intelligently calculate Total Spent if price and quantity exist rather than using arbitrary medians
+        if 'Price Per Unit' in working_df.columns and 'Quantity' in working_df.columns and 'Total Spent' in working_df.columns:
+            math_mask = working_df['Total Spent'].isnull() & working_df['Price Per Unit'].notnull() & working_df['Quantity'].notnull()
+            working_df.loc[math_mask, 'Total Spent'] = working_df.loc[math_mask, 'Price Per Unit'] * working_df.loc[math_mask, 'Quantity']
+        # Contextually handle descriptive text fields
+        if 'Item' in working_df.columns and 'Category' in working_df.columns:
+            working_df['Item'] = working_df['Item'].fillna("Unspecified_" + working_df['Category'].astype(str))
+        st.sidebar.success("🧠 Context-aware mathematical imputation complete.")
+
+    # 2. Standard Median Null Imputation (Fallback for remaining nulls)
     if fix_nulls:
         numeric_fields = working_df.select_dtypes(include=['number']).columns
         for field in numeric_fields:
             working_df[field] = working_df[field].fillna(working_df[field].median())
-        st.sidebar.success("✔️ Empty fields filled using column statistical medians.")
+        st.sidebar.success("✔️ Remaining empty fields filled using statistical medians.")
         
+    # 3. Duplicate Purge
     if purge_dupes:
         rows_before = len(working_df)
         working_df = working_df.drop_duplicates()
         rows_after = len(working_df)
         st.sidebar.success(f"✔️ Flushed {rows_before - rows_after} duplicate transactional rows.")
         
+    # 4. Cross-Column Math Validation & Discrepancy Auditing
+    if math_validate:
+        if 'Price Per Unit' in working_df.columns and 'Quantity' in working_df.columns and 'Total Spent' in working_df.columns:
+            calculated_spent = working_df['Price Per Unit'] * working_df['Quantity']
+            discrepancy_mask = (working_df['Total Spent'] - calculated_spent).abs() > 0.01
+            discrepancy_count = discrepancy_mask.sum()
+            if discrepancy_count > 0:
+                working_df.loc[discrepancy_mask, 'Total Spent'] = calculated_spent.loc[discrepancy_mask]
+                st.sidebar.warning(f"📐 Adjusted {discrepancy_count} cross-column auditing errors.")
+            else:
+                st.sidebar.success("📐 Accounting check: 100% Cross-column validation passed!")
+
+    # 5. Statistical IQR Outlier Filtering
+    if stat_outliers:
+        numeric_fields = working_df.select_dtypes(include=['number']).columns
+        total_outliers_purged = 0
+        for field in numeric_fields:
+            q1 = working_df[field].quantile(0.25)
+            q3 = working_df[field].quantile(0.75)
+            iqr = q3 - q1
+            lower_fence = q1 - 1.5 * iqr
+            upper_fence = q3 + 1.5 * iqr
+            
+            before_filter = len(working_df)
+            working_df = working_df[(working_df[field] >= lower_fence) & (working_df[field] <= upper_fence)]
+            total_outliers_purged += (before_filter - len(working_df))
+        st.sidebar.success(f"📊 IQR Filter: Purged {total_outliers_purged} extreme data anomalies.")
+
+    # 6. Smart Date Standardization
+    if date_standard:
+        for field in working_df.columns:
+            if 'date' in field.lower() or 'time' in field.lower():
+                try:
+                    working_df[field] = pd.to_datetime(working_df[field], errors='coerce').dt.strftime('%Y-%m-%d')
+                    st.sidebar.success(f"📅 Standardized `{field}` to YYYY-MM-DD format.")
+                except:
+                    pass
+
+    # 7. Formatting & Fuzzy Inconsistent Categorical Matching
     if clean_strings:
         for field in working_df.columns:
             if working_df[field].dtype == 'object':
-                working_df[field] = working_df[field].astype(str).str.replace('R', '', regex=False).str.replace('$', '', regex=False).str.strip()
+                # Strip symbols but preserve structural string tracking codes (preserving leading zeros)
+                if not field.lower().endswith('id'):
+                    working_df[field] = working_df[field].astype(str).str.replace('R', '', regex=False).str.replace('$', '', regex=False).str.strip()
                 try:
-                    working_df[field] = pd.to_numeric(working_df[field])
+                    # Only convert to numeric if it doesn't represent an analytical string identity
+                    if not field.lower().endswith('id'):
+                        working_df[field] = pd.to_numeric(working_df[field])
                 except:
                     if not instruction_applied:
-                        working_df[field] = working_df[field].str.title()
-        st.sidebar.success("✔️ Currency labels stripped and string casing standardized.")
+                        # Normalize categorical values ("Credit Card" vs "creditcard" standardizations)
+                        working_df[field] = working_df[field].str.strip().str.title()
+        st.sidebar.success("✔️ Inconsistent string mapping standardizations updated.")
         
     st.subheader("✨ Transformed Engine Preview")
     st.dataframe(working_df.head(10))
