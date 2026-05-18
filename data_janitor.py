@@ -10,7 +10,7 @@ import re
 import hashlib
 
 # Enterprise UI Configuration
-st.set_page_config(page_title="Data Janitor Pro Meta-Engine v4.0", page_icon="🧬", layout="wide")
+st.set_page_config(page_title="Data Janitor Pro Meta-Engine v4.4", page_icon="🧬", layout="wide")
 
 # Initialize Session-Based Audit Ledger & State
 if 'audit_log' not in st.session_state:
@@ -29,11 +29,12 @@ def log_audit_event(action_summary, details=""):
 
 # --- SQLITE WAL PERSISTENCE & TRANSACTION SECURITY LAYER ---
 DB_FILE = "janitor_enterprise_vault.db"
+DEFAULT_FALLBACK_HASH = "26777aad87c7342827e73f9aa735b5fcbc54d52651a95a9cf3e314222f0ff73c"
+MASTER_CRYPTO_HASH = st.secrets.get("MASTER_HASH", DEFAULT_FALLBACK_HASH)
 
 def init_secure_database():
     """Initializes concurrent SQL storage nodes with WAL capabilities to prevent race conditions."""
     conn = sqlite3.connect(DB_FILE, timeout=30.0)
-    # Enable Write-Ahead Logging for structural concurrency protection
     conn.execute('PRAGMA journal_mode=WAL;')
     cursor = conn.cursor()
     cursor.execute('''
@@ -48,11 +49,7 @@ def init_secure_database():
             last_activity REAL NOT NULL
         )
     ''')
-    
-    # Register default master administrator account if database is blank
-    # SHA-256 hash string signature of "123Shelby@"
-    admin_hash = "26777aad87c7342827e73f9aa735b5fcbc54d52651a95a9cf3e314222f0ff73c"
-    cursor.execute('INSERT OR IGNORE INTO secure_users (username, password_hash) VALUES (?, ?)', ('admin', admin_hash))
+    cursor.execute('INSERT OR IGNORE INTO secure_users (username, password_hash) VALUES (?, ?)', ('admin', MASTER_CRYPTO_HASH))
     conn.commit()
     conn.close()
 
@@ -90,13 +87,12 @@ def manage_session_block(username, action="login"):
     user_key = username.lower().strip()
     try:
         cursor = conn.cursor()
-        # Clean session tracking tables of items older than 15 minutes (900s)
         cursor.execute('DELETE FROM active_sessions WHERE ? - last_activity > 900', (current_time,))
         
         if action == "login":
             cursor.execute('SELECT username FROM active_sessions WHERE username = ?', (user_key,))
             if cursor.fetchone():
-                return False  # Collision detected. Account is logged in elsewhere
+                return False  
             cursor.execute('INSERT OR REPLACE INTO active_sessions (username, last_activity) VALUES (?, ?)', (user_key, current_time))
             conn.commit()
         elif action == "logout":
@@ -106,13 +102,11 @@ def manage_session_block(username, action="login"):
     finally:
         conn.close()
 
-# Initialize transactional storage layers
 init_secure_database()
 
 # --- CORE POLYMORPHIC DATA PROCESSING ENGINE ---
 
 def profile_semantic_types(df):
-    """Phase 1: Analyzes data distributions to deduce column intent dynamically."""
     profiles = {}
     for col in df.columns:
         sample_str = df[col].dropna().head(100).astype(str).str.strip()
@@ -141,7 +135,6 @@ def profile_semantic_types(df):
     return profiles
 
 def discover_algebraic_identities(df, numeric_columns):
-    """Phase 2: Permutates numeric axes to dynamically map algebraic relationships."""
     identities = []
     if len(numeric_columns) < 3:
         return identities
@@ -164,8 +157,7 @@ def discover_algebraic_identities(df, numeric_columns):
                     return identities
     return identities
 
-def execute_polymorphic_cleaning(df, config_flags):
-    """Universal parser execution loop completely driven by runtime semantic profiling maps."""
+def execute_polymorphic_cleaning(df, config_flags, global_rules=None):
     df_clean = df.copy()
     semantic_map = profile_semantic_types(df_clean)
     
@@ -188,30 +180,33 @@ def execute_polymorphic_cleaning(df, config_flags):
                     pass
             df_clean[col] = df_clean[col].astype(str).str.strip().str.title()
 
-    # 2. Dynamic Algebraic Imputation Loop
-    if config_flags['smart_impute'] and len(numeric_cols) >= 3:
-        rules = discover_algebraic_identities(df_clean, numeric_cols)
-        for rule_type, colA, colB, colC in rules:
-            if rule_type == 'multiply':
-                mask_c = df_clean[colC].isnull() & df_clean[colA].notnull() & df_clean[colB].notnull()
-                df_clean.loc[mask_c, colC] = df_clean.loc[mask_c, colA] * df_clean.loc[mask_c, colB]
-                
-                mask_a = df_clean[colA].isnull() & df_clean[colC].notnull() & df_clean[colB].notnull() & (df_clean[colB] > 0)
-                df_clean.loc[mask_a, colA] = df_clean.loc[mask_a, colC] / df_clean.loc[mask_a, colB]
-                
-                mask_b = df_clean[colB].isnull() & df_clean[colC].notnull() & df_clean[colA].notnull() & (df_clean[colA] > 0)
-                df_clean.loc[mask_b, colB] = df_clean.loc[mask_b, colC] / df_clean.loc[mask_b, colA]
+    # 2. Dynamic Algebraic Imputation Loop (🎯 TYPO FIX COMPLETED HERE)
+    active_rules = global_rules if global_rules is not None else (discover_algebraic_identities(df_clean, numeric_cols) if config_flags['smart_impute'] else [])
+    
+    if config_flags['smart_impute'] and active_rules:
+        for rule_type, colA, colB, colC in active_rules:
+            if colA in df_clean.columns and colB in df_clean.columns and colC in df_clean.columns:
+                if rule_type == 'multiply':
+                    mask_c = df_clean[colC].isnull() & df_clean[colA].notnull() & df_clean[colB].notnull()
+                    df_clean.loc[mask_c, colC] = df_clean.loc[mask_c, colA] * df_clean.loc[mask_c, colB]
+                    
+                    mask_a = df_clean[colA].isnull() & df_clean[colC].notnull() & df_clean[colB].notnull() & (df_clean[colB] > 0)
+                    df_clean.loc[mask_a, colA] = df_clean.loc[mask_a, colC] / df_clean.loc[mask_a, colB]
+                    
+                    mask_b = df_clean[colB].isnull() & df_clean[colC].notnull() & df_clean[colA].notnull() & (df_clean[colA] > 0)
+                    df_clean.loc[mask_b, colB] = df_clean.loc[mask_b, colC] / df_clean.loc[mask_b, colA]
 
     # 3. Non-Destructive Statistical IQR Outlier Profiling Layer
     if config_flags['stat_outliers']:
+        outlier_cols = [col for col in df_clean.columns if col.endswith('_Outlier_Flag')]
+        df_clean = df_clean.drop(columns=outlier_cols, errors='ignore')
+        
         for col in numeric_cols:
             q1 = df_clean[col].quantile(0.25)
             q3 = df_clean[col].quantile(0.75)
             iqr = q3 - q1
             lower_bound = q1 - 1.5 * iqr
             upper_bound = q3 + 1.5 * iqr
-            
-            # Formulate boolean flags instead of dropping vectors aggressively
             df_clean[f"{col}_Outlier_Flag"] = (df_clean[col] < lower_bound) | (df_clean[col] > upper_bound)
 
     # 4. Handle remaining null records via population medians
@@ -249,7 +244,7 @@ elif user_tier == "🌟 Register Secure Passkey":
     reg_pass = st.sidebar.text_input("Create Private Passkey", type="password")
     invite_code = st.sidebar.text_input("Enterprise Verification Pass", type="password")
     if st.sidebar.button("Register Key Node 🚀"):
-        if hash_passkey(invite_code) == "26777aad87c7342827e73f9aa735b5fcbc54d52651a95a9cf3e314222f0ff73c":
+        if hash_passkey(invite_code) == MASTER_CRYPTO_HASH:
             if reg_user.strip() and reg_pass.strip():
                 register_secure_user(reg_user, reg_pass)
                 st.sidebar.success("✔️ Cryptographic signature saved. Proceed to Login node.")
@@ -259,18 +254,18 @@ elif user_tier == "🌟 Register Secure Passkey":
             st.sidebar.error("❌ Verification failed: Unauthorized invitation code signature.")
 
 elif user_tier == "Premium Member / Admin Login":
-    login_user = st.sidebar.text_input("Username").lower().strip()
+    login_user_input = st.sidebar.text_input("Username").lower().strip()
     login_pass = st.sidebar.text_input("Enter Passkey", type="password")
-    if login_user and login_pass:
-        if authenticate_session(login_user, login_pass):
-            if st.session_state.current_logged_user == login_user:
+    if login_user_input and login_pass:
+        if authenticate_session(login_user_input, login_pass):
+            if st.session_state.current_logged_user == login_user_input:
                 has_full_access = True
-                st.sidebar.success(f"🔥 Secure Node Active: Welcome back, {login_user.title()}.")
+                st.sidebar.success(f"🔥 Secure Node Active: Welcome back, {login_user_input.title()}.")
             else:
-                if manage_session_block(login_user, action="login"):
-                    st.session_state.current_logged_user = login_user
+                if manage_session_block(login_user_input, action="login"):
+                    st.session_state.current_logged_user = login_user_input
                     has_full_access = True
-                    st.sidebar.success(f"🔥 Session Authenticated: Welcome, {login_user.title()}.")
+                    st.sidebar.success(f"🔥 Session Authenticated: Welcome, {login_user_input.title()}.")
                 else:
                     st.sidebar.error("🚨 Collision Block: Account session active on another device node.")
         else:
@@ -280,6 +275,20 @@ elif user_tier == "Premium Member / Admin Login":
 # --- STEP 2: MAIN ENGINE CONTROL LAYER ---
 st.title("🧬 Autonomous Polymorphic Meta-Engine & Reproducibility Suite")
 st.write("An advanced self-correcting data cleaning engine that logs, audits, and normalizes unstructured files.")
+
+with st.expander("📖 Interactive Enterprise User Manual & Operations Guide", expanded=False):
+    st.markdown("""
+    ### Welcome to Data Janitor Pro
+    This application is an autonomous data parsing tool engineered to automatically profile data types, reconstruct accounting errors, and flag anomalies without requiring hardcoded user configuration.
+    
+    #### 🛠️ Operational Steps:
+    1. **Authentication (Sidebar):** Free/Guest uploads are capped at a maximum 60 rows × 60 columns. To process unlimited row files, select **Premium Member Login**, and enter your authorized credentials.
+    2. **Drop Your File:** Upload any messy or unformatted `.csv` or `.xlsx` spreadsheet into the file drop target below.
+    3. **Configure Meta-Directives:** Use the checkboxes in the left-hand configuration panel to activate or isolate specific algorithm routines.
+    4. **Trigger Processing:** Click the **⚡ Trigger Universal Polymorphic Scrubbing** button. The engine will divide the data array into safe memory batches and execute updates.
+    5. **Review Validation Views:** Evaluate changes side-by-side. Modified or imputed record fields are highlighted in green.
+    6. **Export Assets:** Download your clean flat-file data assets, advanced schema-preserving `.parquet` assets, or your legal transparency audit trail log.
+    """)
 
 st.sidebar.markdown("---")
 st.sidebar.header("⚙️ Meta-Pipeline Directives")
@@ -292,6 +301,17 @@ flags = {
     'date_standard': st.sidebar.checkbox("📅 Smart Chronological Formatter", value=True)
 }
 push_to_database = st.sidebar.checkbox("Index Clean Tables into Backend SQLite")
+
+st.sidebar.markdown("---")
+st.sidebar.subheader("🎛️ Performance Tuning")
+chunk_size = st.sidebar.slider(
+    "Chunk Size (rows per batch)", 
+    min_value=500, 
+    max_value=50000, 
+    value=5000, 
+    step=500,
+    help="Smaller chunks consume less container RAM but process slower. Adjust scale dynamically based on your volume layout."
+)
 
 my_raw_file = st.file_uploader("Upload any unstructured sheet dataset here", type=["csv", "xlsx"])
 
@@ -313,7 +333,7 @@ if my_raw_file is not None:
 
     working_df_original = working_df.copy()
 
-    # Diagnostic Visuals Report
+    # Diagnostic Visuals Profile Report
     st.markdown("---")
     st.subheader("📊 Engine Diagnostic Profile")
     m1, m2, m3, m4 = st.columns(4)
@@ -332,22 +352,38 @@ if my_raw_file is not None:
         st.session_state.audit_log = [] 
         log_audit_event("Ingested File Instance", f"Filename: {my_raw_file.name} | Dimensions: {total_rows}x{total_cols}")
         
-        log_txt.text("Phase 1: Segmenting file buffers into memory-safe calculation chunks...")
-        prog.progress(25)
+        log_txt.text("Phase 1: Analyzing global sample mapping to preserve cross-chunk identities...")
+        prog.progress(10)
         
-        try:
-            chunk_size = 5000
-            chunks_accumulator = []
+        global_algebraic_rules = []
+        if flags['smart_impute'] and len(working_df) > 0:
+            sample_size = min(1000, len(working_df))
+            sample_df = working_df.head(sample_size).copy()
             
-            for start_idx in range(0, len(working_df), chunk_size):
+            sample_semantic_map = profile_semantic_types(sample_df)
+            numeric_cols_sample = [c for c, t in sample_semantic_map.items() if t == "numeric"]
+            global_algebraic_rules = discover_algebraic_identities(sample_df, numeric_cols_sample)
+            
+            if global_algebraic_rules:
+                log_audit_event("Global Equation Lock Instantiated", f"Identified global equation pattern constraints: {global_algebraic_rules}")
+
+        try:
+            chunks_accumulator = []
+            total_chunks = (len(working_df) + chunk_size - 1) // chunk_size
+            
+            for i, start_idx in enumerate(range(0, len(working_df), chunk_size)):
+                progress_pct = 10 + int((i / total_chunks) * 85)
+                prog.progress(progress_pct)
+                log_txt.text(f"Processing data array segment chunk {i+1} of {total_chunks}...")
+                
                 chunk_slice = working_df.iloc[start_idx : start_idx + chunk_size].copy()
-                cleaned_slice = execute_polymorphic_cleaning(chunk_slice, flags)
+                cleaned_slice = execute_polymorphic_cleaning(chunk_slice, flags, global_rules=global_algebraic_rules)
                 chunks_accumulator.append(cleaned_slice)
             
             working_df = pd.concat(chunks_accumulator, ignore_index=True)
             prog.progress(100)
             log_txt.success("✨ Engine successfully normalized the target matrix using isolated chunk streams!")
-            log_audit_event("Chunked Pipeline Engine Optimization", f"Data frame processed cleanly across chunks of size {chunk_size}")
+            log_audit_event("Chunked Pipeline Engine Optimization", f"Data frame processed cleanly across {total_chunks} chunks using custom size bounds of {chunk_size}")
             
         except Exception as err:
             st.error(f"Pipeline Interruption: {err}")
@@ -399,7 +435,7 @@ if my_raw_file is not None:
         audit_json = json.dumps(st.session_state.audit_log, indent=2)
         st.download_button("📥 Download Reproducible Audit Log (.json)", data=audit_json, file_name=f"audit_trail_{datetime.date.today()}.json", mime="application/json")
 
-# System Feedback Terminal Block
+# System Feedback Terminal Block (🎯 Fixed undefined user login context variables here)
 st.markdown("---")
 st.subheader("⭐ System Feedback Terminal")
 fa, fb = st.columns(2)
@@ -412,7 +448,8 @@ with fa:
         st.success("Log safely transmitted.")
 with fb:
     st.markdown("### 🔒 Private Administrator Logging Port")
-    if has_full_access and login_user == "admin":
+    current_session_user = st.session_state.get('current_logged_user', '')
+    if has_full_access and current_session_user == "admin":
         if os.path.exists("user_feedback_vault.txt"):
             with open("user_feedback_vault.txt", "r") as f:
                 st.text(f.read())
