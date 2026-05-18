@@ -3,83 +3,125 @@ import pandas as pd
 import sqlite3
 import io
 
-st.set_page_config(page_title="Data Janitor Engine", layout="wide")
+# Custom page layout for the web engine
+st.set_page_config(page_title="Data Cleaner Portfolio", layout="wide")
 
-st.title("🧼 The Data Janitor & Financial Analytics Engine")
-st.write("An automated cloud pipeline built to ingest raw datasets, execute algorithmic scrubbing, and index relational tables.")
+# --- STEP 1: GATEKEEPER & ACCESS PRIVILEGES ---
+st.sidebar.header("🔑 App Access Control")
+user_tier = st.sidebar.radio("Your Current Tier", ["Free / Guest User", "Admin / Premium Login"])
 
-# Sidebar Controls for the Pipeline Steps
-st.sidebar.header("🛠️ Pipeline Control Panel")
-fix_nulls = st.sidebar.checkbox("Algorithmic Null Imputation (Statistical Median)")
-drop_dupes = st.sidebar.checkbox("Purge Duplicate Transactions")
-standardize_text = st.sidebar.checkbox("Standardize Text Formatting (Proper Case)")
-load_to_sql = st.sidebar.checkbox("Index Clean Tables into SQLite DB")
+has_full_access = False
 
-# File Ingestion
-uploaded_file = st.file_uploader("Upload raw retail or financial dataset", type=["csv", "xlsx"])
-
-if uploaded_file is not None:
-    # Check the format of the incoming file
-    is_csv = uploaded_file.name.endswith('.csv')
+if user_tier == "Admin / Premium Login":
+    entered_pass = st.sidebar.text_input("Enter Passkey", type="password")
     
-    # 1. EXTRACT
-    df = pd.read_csv(uploaded_file) if is_csv else pd.read_excel(uploaded_file)
+    # Custom administrative passkey verification
+    if entered_pass == "123Shelby@":
+        st.sidebar.success("🔥 Admin access granted. Rows limit removed!")
+        has_full_access = True
+    elif entered_pass != "":
+        st.sidebar.error("❌ Locked out. Stick to Free Tier rules.")
+
+# --- STEP 2: MAIN INTERFACE DISPLAY ---
+st.title("🧼 Automated Data Cleaner & Relational Analytics Dashboard")
+st.write("A customized Python data engine built to handle messy business spreadsheets and load them into relational SQL tables.")
+
+st.sidebar.markdown("---")
+st.sidebar.header("⚙️ Cleaning Operations Panel")
+fix_nulls = st.sidebar.checkbox("Statistical Median Null Imputation")
+purge_dupes = st.sidebar.checkbox("Remove Duplicate Transaction Rows")
+clean_strings = st.sidebar.checkbox("Strip Currency (R / $) & Standardize Casing")
+push_to_database = st.sidebar.checkbox("Index Clean Tables into Backend SQLite")
+
+# File uploader section supporting CSV and Excel spreadsheets
+my_raw_file = st.file_uploader("Drop your messy retail dataset here", type=["csv", "xlsx"])
+
+if my_raw_file is not None:
+    file_format_csv = my_raw_file.name.endswith('.csv')
     
-    st.subheader("📊 Ingested Raw Data View")
-    st.dataframe(df.head(10))
+    # Try-except safeguard to ensure unreadable formats don't crash the web portal
+    try:
+        loaded_df = pd.read_csv(my_raw_file) if file_format_csv else pd.read_excel(my_raw_file)
+    except Exception as read_error:
+        st.error(f"❌ File Reading Disruption: Structure is corrupted. Details: {read_error}")
+        st.stop()
+        
+    # --- STEP 3: OUTSIDER LIMITATION RULES ---
+    total_dataset_rows = len(loaded_df)
     
-    # 2. TRANSFORM ENGINE
+    if not has_full_access and total_dataset_rows > 50:
+        st.warning(f"⚠️ Free Tier Restriction: File contains {total_dataset_rows} rows. Caps apply at 50 rows.")
+        st.info("💡 Enter the Admin Passkey in the sidebar panel to unlock unlimited enterprise processing rows.")
+        # Slice out a preview block for non-paying outsiders
+        working_df = loaded_df.head(50).copy()
+        st.subheader("📊 Ingested Dataset Overview (Restricted Free Tier Preview)")
+    else:
+        working_df = loaded_df.copy()
+        st.subheader(f"📊 Ingested Dataset Overview (Processing Mode: {total_dataset_rows} Rows Active)")
+        
+    st.dataframe(working_df.head(10))
+    
+    # --- STEP 4: CUSTOM TRANSFORM CLEANING LOGIC ---
     if fix_nulls:
-        numeric_cols = df.select_dtypes(include=['number']).columns
-        for col in numeric_cols:
-            df[col] = df[col].fillna(df[col].median())
-        st.sidebar.success("✔️ Null fields imputed with statistical medians.")
+        # Pull numeric columns to prevent string transformation conflicts
+        numeric_fields = working_df.select_dtypes(include=['number']).columns
+        for field in numeric_fields:
+            working_df[field] = working_df[field].fillna(working_df[field].median())
+        st.sidebar.success("✔️ Empty fields filled using column statistical medians.")
         
-    if drop_dupes:
-        before_count = len(df)
-        df = df.drop_duplicates()
-        after_count = len(df)
-        st.sidebar.success(f"✔️ Purged {before_count - after_count} duplicate rows.")
+    if purge_dupes:
+        rows_before = len(working_df)
+        working_df = working_df.drop_duplicates()
+        rows_after = len(working_df)
+        st.sidebar.success(f"✔️ Flushed {rows_before - rows_after} duplicate transactional rows.")
         
-    if standardize_text:
-        string_cols = df.select_dtypes(include=['object']).columns
-        for col in string_cols:
-            df[col] = df[col].astype(str).str.strip().str.title()
-        st.sidebar.success("✔️ Character cases and white spaces standardized.")
+    if clean_strings:
+        # Loop over object columns to strip financial notations and whitespaces
+        for field in working_df.columns:
+            if working_df[field].dtype == 'object':
+                working_df[field] = working_df[field].astype(str).str.replace('R', '', regex=False).str.replace('$', '', regex=False).str.strip()
+                # Attempt conversion back to numeric if column noise is removed
+                try:
+                    working_df[field] = pd.to_numeric(working_df[field])
+                except:
+                    # Enforce proper string formatting for categories and names
+                    working_df[field] = working_df[field].str.title()
+        st.sidebar.success("✔️ Currency labels stripped and string casing standardized.")
         
-    # Preview Transformed Data
+    # Display the final transformed overview on screen
     st.subheader("✨ Transformed Engine Preview")
-    st.dataframe(df.head(10))
+    st.dataframe(working_df.head(10))
     
-    # 3. LOAD ENGINE (Backend Database Logging)
-    if load_to_sql:
-        conn = sqlite3.connect("retail_analytics.db")
-        df.to_sql("clean_transactions", conn, if_exists="replace", index=False)
-        conn.close()
-        st.sidebar.info("🚀 Relational tables indexed in SQLite backend.")
+    # --- STEP 5: BACKEND SQL INTEGRATION ---
+    if push_to_database:
+        try:
+            db_connection = sqlite3.connect("retail_analytics.db")
+            working_df.to_sql("clean_transactions", db_connection, if_exists="replace", index=False)
+            db_connection.close()
+            st.sidebar.info("🚀 Relational table updated in SQLite.")
+        except Exception as database_error:
+            st.sidebar.error(f"Database Exception: {database_error}")
 
-    # 4. EXPORT ENGINE (User Convenience Feature)
+    # --- STEP 6: OUTPUT GENERATION MATCHING INPUT FORMAT ---
     st.markdown("---")
-    st.subheader("💾 Download Cleaned Dataset")
+    st.subheader("💾 Export Clean Dataset")
     
-    if is_csv:
-        # Prepare a pristine CSV download stream
-        clean_csv = df.to_csv(index=False).encode('utf-8')
+    if file_format_csv:
+        csv_stream = working_df.to_csv(index=False).encode('utf-8')
         st.download_button(
-            label="📥 Download Cleaned CSV File",
-            data=clean_csv,
-            file_name=f"cleaned_{uploaded_file.name}",
+            label="📥 Download Clean CSV File",
+            data=csv_stream,
+            file_name=f"cleaned_{my_raw_file.name}",
             mime="text/csv"
         )
     else:
-        # Prepare a pristine Excel download stream using an in-memory buffer
-        buffer = io.BytesIO()
-        with pd.ExcelWriter(buffer, engine='openpyxl') as writer:
-            df.to_excel(writer, index=False, sheet_name='Clean Data')
+        memory_buffer = io.BytesIO()
+        with pd.ExcelWriter(memory_buffer, engine='openpyxl') as excel_writer:
+            working_df.to_excel(excel_writer, index=False, sheet_name='Cleaned Data Output')
         
         st.download_button(
-            label="📥 Download Cleaned Excel File",
-            data=buffer.getvalue(),
-            file_name=f"cleaned_{uploaded_file.name}",
+            label="📥 Download Clean Excel File",
+            data=memory_buffer.getvalue(),
+            file_name=f"cleaned_{my_raw_file.name}",
             mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
         )
