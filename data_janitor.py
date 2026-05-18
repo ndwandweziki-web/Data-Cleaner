@@ -48,17 +48,49 @@ if my_raw_file is not None:
         
     total_dataset_rows = len(loaded_df)
     
+    # --- STEP 3: OUTSIDER LIMITATION RULES ---
     if not has_full_access and total_dataset_rows > 50:
         st.warning(f"⚠️ Free Tier Restriction: File contains {total_dataset_rows} rows. Caps apply at 50 rows.")
         st.info("💡 Enter the Admin Passkey in the sidebar panel to unlock unlimited enterprise processing rows.")
         working_df = loaded_df.head(50).copy()
-        st.subheader("📊 Ingested Dataset Overview (Restricted Free Tier Preview)")
     else:
         working_df = loaded_df.copy()
-        st.subheader(f"📊 Ingested Dataset Overview (Processing Mode: {total_dataset_rows} Rows Active)")
-        
+
+    # --- NEW FEATURE: AUTOMATED DATA HEALTH DIAGNOSTIC REPORT ---
+    st.markdown("---")
+    st.subheader("📊 Automated Data Health & Integrity Report")
+    st.write("The engine has analyzed your raw dataset file architecture. Here are the structural anomalies detected:")
+    
+    # Run rapid background analysis counts
+    total_nulls = int(working_df.isnull().sum().sum())
+    total_duplicates = int(working_df.duplicated().sum())
+    total_columns = len(working_df.columns)
+    current_rows = len(working_df)
+    
+    # Create 4 clean visual metric blocks on the screen
+    metric_col1, metric_col2, metric_col3, metric_col4 = st.columns(4)
+    
+    with metric_col1:
+        st.metric(label="Total Rows Scanned", value=current_rows)
+    with metric_col2:
+        st.metric(label="Columns Detected", value=total_columns)
+    with metric_col3:
+        st.metric(label="Missing (Null) Cells", value=total_nulls, delta="- Action Required" if total_nulls > 0 else "Clean", delta_color="inverse" if total_nulls > 0 else "normal")
+    with metric_col4:
+        st.metric(label="Duplicate Rows Found", value=total_duplicates, delta="- Action Required" if total_duplicates > 0 else "Clean", delta_color="inverse" if total_duplicates > 0 else "normal")
+
+    # Informative guide row based on analytics results
+    if total_nulls > 0 or total_duplicates > 0:
+        st.info("💡 **Diagnostic Advice:** Use the left control panel switches to apply algorithmic statistical scrubbing to clean up these anomalies.")
+    else:
+        st.success("✨ **Diagnostic Advice:** Your data layout shows zero initial nulls or duplicate rows! It is completely structured.")
+
+    # Show Raw Data View
+    st.markdown("---")
+    st.subheader("📋 Ingested Dataset Overview")
     st.dataframe(working_df.head(10))
     
+    # --- STEP 4: CUSTOM TRANSFORM CLEANING LOGIC ---
     if fix_nulls:
         numeric_fields = working_df.select_dtypes(include=['number']).columns
         for field in numeric_fields:
@@ -81,9 +113,11 @@ if my_raw_file is not None:
                     working_df[field] = working_df[field].str.title()
         st.sidebar.success("✔️ Currency labels stripped and string casing standardized.")
         
+    # Display the final transformed overview on screen
     st.subheader("✨ Transformed Engine Preview")
     st.dataframe(working_df.head(10))
     
+    # --- STEP 5: BACKEND SQL INTEGRATION ---
     if push_to_database:
         try:
             db_connection = sqlite3.connect("retail_analytics.db")
@@ -93,6 +127,7 @@ if my_raw_file is not None:
         except Exception as database_error:
             st.sidebar.error(f"Database Exception: {database_error}")
 
+    # --- STEP 6: OUTPUT GENERATION MATCHING INPUT FORMAT ---
     st.markdown("---")
     st.subheader("💾 Export Clean Dataset")
     
@@ -116,24 +151,21 @@ if my_raw_file is not None:
             mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
         )
 
-# --- STEP 3: WORLD-CLASS USER REVIEW & ADMIN INSIGHTS SYSTEM ---
+# --- STEP 7: USER REVIEW & ADMIN INSIGHTS SYSTEM ---
 st.markdown("---")
 st.subheader("⭐ User Experience Feedback Hub")
 
-# Create two visual columns: one for users to review, one for the Admin dashboard
 col1, col2 = st.columns([1, 1])
 
 with col1:
     st.markdown("### Share Your Experience")
     st.write("Help us make this engine the most powerful tool on the market. Leave a rating and recommend new cleaning features!")
     
-    # Interactive Feedback Inputs
     user_rating = st.slider("Rate the Data Janitor Engine (1 = Poor, 5 = Elite)", 1, 5, 5)
     user_review = st.text_area("What features or adjustments would make this app better for your daily workflow?")
     
     if st.button("Submit Anonymous Feedback 🚀"):
         if user_review.strip() != "":
-            # Save feedback to a local hidden text vault
             timestamp = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
             log_entry = f"[{timestamp}] Rating: {user_rating}/5 | Feedback: {user_review}\n"
             
@@ -153,7 +185,6 @@ with col2:
             with open("user_feedback_vault.txt", "r") as vault_file:
                 feedback_records = vault_file.readlines()
             
-            # Show reviews in reverse order so the newest are always at the top
             for record in reversed(feedback_records):
                 if "Rating: 5" in record or "Rating: 4" in record:
                     st.info(record)
