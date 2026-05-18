@@ -6,11 +6,12 @@ import io
 import os
 import datetime
 import json
+import re
 
-# Custom page layout for the web engine
-st.set_page_config(page_title="Data Janitor Premium Engine", page_icon="🧼", layout="wide")
+# Premium UI Configuration
+st.set_page_config(page_title="Polymorphic Meta-Engine v2.0", page_icon="🧬", layout="wide")
 
-# --- DATABASE / LOCAL PERSISTENT STORAGE SIMULATION ---
+# --- APP ACCESS CONTROL & SESSION TRACKING ---
 USER_DB_FILE = "premium_users_vault.json"
 SESSION_LOG_FILE = "active_sessions_tracker.json"
 
@@ -41,88 +42,162 @@ def track_active_session(username, action="login"):
                 sessions = json.load(f)
         except:
             sessions = {}
-            
     user_key = username.lower().strip()
     sessions = {u: t for u, t in sessions.items() if (current_time - t) < 900}
-    
     if action == "login":
         if user_key in sessions:
-            return False  
+            return False
         sessions[user_key] = current_time
     elif action == "logout":
         if user_key in sessions:
             del sessions[user_key]
-            
     with open(SESSION_LOG_FILE, "w") as f:
         json.dump(sessions, f)
     return True
 
 premium_vault = load_premium_keys()
-
 if 'current_logged_user' not in st.session_state:
     st.session_state.current_logged_user = None
 
-# --- PIPELINE MODULAR ADVANCED CLEANING ENGINE FUNCTIONS ---
+# --- CORE POLYMORPHIC DATA PROCESSING ENGINE ---
 
-def clean_currency_and_strings(df, selected_columns=None):
+def profile_semantic_types(df):
+    """
+    Phase 1: Analyzes data distributions to deduce column intent without relying on column names.
+    Returns a dictionary mapping column names to their discovered semantic category.
+    """
+    profiles = {}
+    for col in df.columns:
+        # Cast a sample to string for regex checks
+        sample_str = df[col].dropna().head(100).astype(str).str.strip()
+        if sample_str.empty:
+            profiles[col] = "empty"
+            continue
+            
+        # Check for Date/Time signatures
+        date_hits = sample_str.apply(lambda x: 1 if re.match(r'^\d{4}[-/]\d{2}[-/]\d{2}', x) or re.search(r'\d{2}/', x) else 0).sum()
+        if date_hits / len(sample_str) > 0.5:
+            profiles[col] = "date"
+            continue
+
+        # Check for mixed currency string noise
+        currency_hits = sample_str.apply(lambda x: 1 if any(symbol in x for symbol in ['R', '$', '€', '£']) else 0).sum()
+        
+        # Coerce column to see if it's fundamentally numerical
+        numeric_coerced = pd.to_numeric(df[col].astype(str).str.replace(r'[R\$\s,]', '', regex=True), errors='coerce')
+        valid_numeric_ratio = numeric_coerced.notnull().sum() / len(df[col])
+        
+        if valid_numeric_ratio > 0.6 or currency_hits / len(sample_str) > 0.3:
+            profiles[col] = "numeric"
+            continue
+            
+        # Differentiate between unique relational system codes and descriptive text fields
+        unique_ratio = df[col].nunique() / len(df[col]) if len(df[col]) > 0 else 0
+        if unique_ratio > 0.8 and any(token in col.lower() for token in ['id', 'key', 'code', 'pk']):
+            profiles[col] = "system_key"
+        else:
+            profiles[col] = "categorical_text"
+            
+    return profiles
+
+def discover_algebraic_identities(df, numeric_columns):
+    """
+    Phase 2: Runs programmatic permutations across all numerical vectors to find linear equations.
+    Deduces relationships like: Col_A * Col_B = Col_C or Col_A + Col_B = Col_C
+    """
+    identities = []
+    if len(numeric_columns) < 3:
+        return identities
+
+    # Sample non-null validation rows to test integrity formulas
+    test_df = df[numeric_columns].dropna().head(500)
+    if len(test_df) < 5:
+        return identities
+
+    cols = list(numeric_columns)
+    for i in range(len(cols)):
+        for j in range(len(cols)):
+            if i == j: continue
+            for k in range(len(cols)):
+                if k == i or k == j: continue
+                
+                A, B, C = test_df[cols[i]], test_df[cols[j]], test_df[cols[k]]
+                
+                # Test Multiplicative Rule: A * B == C
+                if np.allclose(A * B, C, rtol=1e-2, atol=1e-2):
+                    identities.append(('multiply', cols[i], cols[j], cols[k]))
+                    return identities # Return earliest complete matching matrix rule
+                # Test Additive Rule: A + B == C
+                if np.allclose(A + B, C, rtol=1e-2, atol=1e-2):
+                    identities.append(('add', cols[i], cols[j], cols[k]))
+                    return identities
+    return identities
+
+def execute_polymorphic_cleaning(df, config_flags):
+    """
+    Executes universal parsing optimizations driven completely by semantic layout logic.
+    """
     df_clean = df.copy()
-    if not selected_columns:
-        selected_columns = [col for col in df_clean.columns if any(x in col.lower() for x in ['price', 'spent', 'amount', 'cost'])]
+    semantic_map = profile_semantic_types(df_clean)
     
-    for col in selected_columns:
-        if col in df_clean.columns:
-            df_clean[col] = df_clean[col].astype(str).str.replace('R', '', regex=False)
-            df_clean[col] = df_clean[col].str.replace('$', '', regex=False).str.strip()
+    # Identify localized sub-vectors
+    numeric_cols = [c for c, t in semantic_map.items() if t == "numeric"]
+    text_cols = [c for c, t in semantic_map.items() if t == "categorical_text"]
+    date_cols = [c for c, t in semantic_map.items() if t == "date"]
+
+    # 1. Strip currency and non-numeric artifacts safely
+    if config_flags['clean_strings']:
+        for col in numeric_cols:
+            df_clean[col] = df_clean[col].astype(str).str.replace(r'[R\$\s,€£]', '', regex=True)
             df_clean[col] = pd.to_numeric(df_clean[col], errors='coerce')
-            
-    for col in df_clean.select_dtypes(include=['object']).columns:
-        if not col.lower().endswith('id') and col not in selected_columns:
+
+        # Human-Readable Optimization Loop for encoded system tokens (e.g., Item_10_PAT -> Item 10)
+        for col in text_cols:
+            if df_clean[col].astype(str).str.contains('_').sum() / len(df_clean) > 0.4:
+                df_clean[col] = df_clean[col].astype(str).str.replace('_', ' ', regex=False)
+                try:
+                    df_clean[col] = df_clean[col].str.split().str[0] + ' ' + df_clean[col].str.split().str[1]
+                except:
+                    pass
             df_clean[col] = df_clean[col].astype(str).str.strip().str.title()
-            
+
+    # 2. Dynamic Identity Discovery and Algebraic Imputation Loop
+    if config_flags['smart_impute'] and len(numeric_cols) >= 3:
+        rules = discover_algebraic_identities(df_clean, numeric_cols)
+        for rule_type, colA, colB, colC in rules:
+            if rule_type == 'multiply':
+                # Reconstruct C (Total)
+                mask_c = df_clean[colC].isnull() & df_clean[colA].notnull() & df_clean[colB].notnull()
+                df_clean.loc[mask_c, colC] = df_clean.loc[mask_c, colA] * df_clean.loc[mask_c, colB]
+                # Reconstruct A (Price)
+                mask_a = df_clean[colA].isnull() & df_clean[colC].notnull() & df_clean[colB].notnull() & (df_clean[colB] > 0)
+                df_clean.loc[mask_a, colA] = df_clean.loc[mask_a, colC] / df_clean.loc[mask_a, colB]
+                # Reconstruct B (Quantity)
+                mask_b = df_clean[colB].isnull() & df_clean[colC].notnull() & df_clean[colA].notnull() & (df_clean[colA] > 0)
+                df_clean.loc[mask_b, colB] = df_clean.loc[mask_b, colC] / df_clean.loc[mask_b, colA]
+
+    # 3. Handle remaining null records using statistical metrics
+    if config_flags['fix_nulls']:
+        for col in numeric_cols:
+            df_clean[col] = df_clean[col].fillna(df_clean[col].median())
+        for col in text_cols:
+            df_clean[col] = df_clean[col].replace(['Nan', 'None', 'Null', ''], np.nan)
+            df_clean[col] = df_clean[col].fillna("Unspecified Field")
+
+    # 4. Standardize any field discovered to be a date vector
+    if config_flags['date_standard']:
+        for col in date_cols:
+            df_clean[col] = pd.to_datetime(df_clean[col], errors='coerce').dt.strftime('%Y-%m-%d')
+
+    # 5. Drop duplicate historical profiles
+    if config_flags['purge_dupes']:
+        df_clean = df_clean.drop_duplicates()
+
     return df_clean
 
-def clean_context_imputation(df):
-    df_clean = df.copy()
-    if all(c in df_clean.columns for c in ['Price Per Unit', 'Quantity', 'Total Spent']):
-        math_mask = df_clean['Total Spent'].isnull() & df_clean['Price Per Unit'].notnull() & df_clean['Quantity'].notnull()
-        df_clean.loc[math_mask, 'Total Spent'] = df_clean.loc[math_mask, 'Price Per Unit'] * df_clean.loc[math_mask, 'Quantity']
-        
-        for financial_col in ['Price Per Unit', 'Total Spent']:
-            if financial_col in df_clean.columns:
-                df_clean[financial_col] = df_clean[financial_col].clip(lower=0.0)
-            
-    if 'Item' in df_clean.columns and 'Category' in df_clean.columns:
-        item_mask = df_clean['Item'].isnull() & df_clean['Category'].notnull()
-        df_clean.loc[item_mask, 'Item'] = "Unspecified_" + df_clean.loc[item_mask, 'Category'].astype(str)
-        df_clean['Item'] = df_clean['Item'].fillna("Unspecified_UnknownCategory")
-        
-    return df_clean
-
-def display_visual_comparison(original_df, cleaned_df):
-    st.markdown("### 🔄 Delta Engine Validation View")
-    st.write("Review the differences below. Processed layout datasets are displayed side-by-side.")
-    
-    orig_sample = original_df.head(10).reset_index(drop=True)
-    clean_sample = cleaned_df.head(10).reset_index(drop=True)
-    
-    col_orig, col_clean = st.columns(2)
-    with col_orig:
-        st.markdown("**📋 Original Ingested Sample**")
-        st.dataframe(orig_sample)
-    with col_clean:
-        st.markdown("**✨ Cleaned Pipeline Output (Changes Highlighted)**")
-        try:
-            styled_clean = clean_sample.style.apply(
-                lambda x: np.where(orig_sample != clean_sample, 'background-color: rgba(46, 204, 113, 0.25)', ''), 
-                axis=None
-            )
-            st.dataframe(styled_clean)
-        except:
-            st.dataframe(clean_sample)
-
-# --- STEP 1: GATEKEEPER & ACCESS CONTROL ---
-st.sidebar.header("🔑 App Access Control")
-user_tier = st.sidebar.radio("Your Current Tier", ["Free / Guest User", "Premium Member / Admin Login", "🌟 Register Custom Passkey"])
+# --- GATEKEEPER SIDEBAR INTERFACE ---
+st.sidebar.header("🔑 Engine Access Validation")
+user_tier = st.sidebar.radio("Authorization Status", ["Free / Guest User", "Premium Member / Admin Login", "🌟 Register Custom Passkey"])
 
 has_full_access = False
 
@@ -130,251 +205,158 @@ if user_tier == "Free / Guest User":
     if st.session_state.current_logged_user:
         track_active_session(st.session_state.current_logged_user, action="logout")
         st.session_state.current_logged_user = None
-    st.sidebar.info("ℹ️ Free tier limits: Maximum 60 Rows and 60 Columns.")
+    st.sidebar.info("ℹ️ Free tier limited to maximum 60 rows × 60 columns processing slice.")
 
 elif user_tier == "🌟 Register Custom Passkey":
-    st.sidebar.subheader("Create Your Custom Access Key")
     reg_user = st.sidebar.text_input("Choose Username")
     reg_pass = st.sidebar.text_input("Create Custom Passkey", type="password")
-    invite_code = st.sidebar.text_input("Enter Premium Invitation Verification Code", type="password")
-    
-    if st.sidebar.button("Register Key 🚀"):
+    invite_code = st.sidebar.text_input("Verification Code", type="password")
+    if st.sidebar.button("Register Engine Access Key 🚀"):
         if invite_code == "123Shelby@":
-            if reg_user.strip() != "" and reg_pass.strip() != "":
+            if reg_user.strip() and reg_pass.strip():
                 save_premium_key(reg_user, reg_pass)
-                st.sidebar.success(f"✔️ Key registered for {reg_user}! Select 'Premium Member Login' to sign in.")
+                st.sidebar.success("✔️ Key registered! Select 'Premium Member Login' to verify.")
             else:
-                st.sidebar.error("❌ Username or Passkey fields cannot be left blank.")
+                st.sidebar.error("❌ Credentials cannot be empty.")
         else:
-            st.sidebar.error("❌ Invalid Invitation Code. Paid subscription verification failed.")
+            st.sidebar.error("❌ Verification failed.")
 
 elif user_tier == "Premium Member / Admin Login":
     login_user = st.sidebar.text_input("Username").lower().strip()
     login_pass = st.sidebar.text_input("Enter Passkey", type="password")
-    
     if login_user and login_pass:
         if login_user in premium_vault and premium_vault[login_user] == login_pass:
             if st.session_state.current_logged_user == login_user:
                 has_full_access = True
-                st.sidebar.success(f"🔥 Welcome back, {login_user.title()}! Constraints removed.")
+                st.sidebar.success(f"🔥 Welcome back {login_user.title()}! Access granted.")
             else:
-                allowed = track_active_session(login_user, action="login")
-                if allowed:
+                if track_active_session(login_user, action="login"):
                     st.session_state.current_logged_user = login_user
                     has_full_access = True
-                    st.sidebar.success(f"🔥 Success! Logged in as {login_user.title()}. Constraints removed.")
+                    st.sidebar.success(f"🔥 Success! Logged in as {login_user.title()}.")
                 else:
-                    st.sidebar.error("🚨 Access Denied: Account active on another window/device.")
+                    st.sidebar.error("🚨 Active Session Blocked: Session running elsewhere.")
         else:
             if login_pass != "":
-                st.sidebar.error("❌ Invalid Username or Passkey entry.")
+                st.sidebar.error("❌ Invalid authorization key.")
 
-# --- STEP 2: MAIN INTERFACE DISPLAY ---
-st.title("🧼 Automated Data Cleaner & Relational Analytics Dashboard")
-st.write("A customized Python data engine built to handle messy business spreadsheets and load them into relational SQL tables.")
+# --- MAIN DASHBOARD WINDOW ---
+st.title("🧬 Autonomous Polymorphic Meta-Engine")
+st.write("An advanced self-correcting ingestion framework built to automatically profile, audit, and clean unstructured tables.")
 
 st.sidebar.markdown("---")
-st.sidebar.header("⚙️ Advanced Cleaning Suite")
-fix_nulls = st.sidebar.checkbox("Statistical Median Null Imputation", value=True)
-smart_impute = st.sidebar.checkbox("🧠 Context-Aware Math Imputation", value=True)
-purge_dupes = st.sidebar.checkbox("Remove Duplicate Transaction Rows", value=True)
-clean_strings = st.sidebar.checkbox("Strip Currency & Standardize Casing", value=True)
-math_validate = st.sidebar.checkbox("📐 Cross-Column Math Validation", value=True)
-stat_outliers = st.sidebar.checkbox("📊 Statistical IQR Outlier Filtering")
-date_standard = st.sidebar.checkbox("📅 Smart Date Standardization", value=True)
+st.sidebar.header("⚙️ Meta-Pipeline Settings")
+flags = {
+    'fix_nulls': st.sidebar.checkbox("Statistical Median Null Imputation", value=True),
+    'smart_impute': st.sidebar.checkbox("🧠 Polymorphic Identity Extraction", value=True),
+    'purge_dupes': st.sidebar.checkbox("Purge Redundant Matrix Profiles", value=True),
+    'clean_strings': st.sidebar.checkbox("Strip Currency Noise & Standardize Text", value=True),
+    'date_standard': st.sidebar.checkbox("📅 Smart Chronological Formatter", value=True)
+}
 push_to_database = st.sidebar.checkbox("Index Clean Tables into Backend SQLite")
 
-my_raw_file = st.file_uploader("Drop your messy retail dataset here", type=["csv", "xlsx"])
+my_raw_file = st.file_uploader("Upload any unstructured sheet dataset here", type=["csv", "xlsx"])
 
 if my_raw_file is not None:
-    file_format_csv = my_raw_file.name.endswith('.csv')
-    
+    is_csv = my_raw_file.name.endswith('.csv')
     try:
-        loaded_df = pd.read_csv(my_raw_file) if file_format_csv else pd.read_excel(my_raw_file)
-    except Exception as read_error:
-        st.error(f"❌ File Reading Disruption: Structure is corrupted. Details: {read_error}")
+        loaded_df = pd.read_csv(my_raw_file) if is_csv else pd.read_excel(my_raw_file)
+    except Exception as e:
+        st.error(f"❌ Corrupt File Architecture: {e}")
         st.stop()
-        
-    total_raw_rows = len(loaded_df)
-    total_raw_cols = len(loaded_df.columns)
+
+    total_rows, total_cols = len(loaded_df), len(loaded_df.columns)
     
-    # --- STEP 3: AUTOMATED 60-ROW & 60-COLUMN SLICER FOR GUESTS ---
-    if not has_full_access:
-        if total_raw_rows > 60 or total_raw_cols > 60:
-            st.warning(f"⚠️ **Free Tier Limit Applied!** Original file size was **{total_raw_rows} rows × {total_raw_cols} columns**. Sliced down to maximum constraints of **60 rows × 60 columns**.")
-            row_cutoff = min(total_raw_rows, 60)
-            col_cutoff = min(total_raw_cols, 60)
-            working_df = loaded_df.iloc[:row_cutoff, :col_cutoff].copy()
-        else:
-            working_df = loaded_df.copy()
+    if not has_full_access and (total_rows > 60 or total_cols > 60):
+        st.warning(f"⚠️ **Free Tier Slicer Triggered!** File size restricted down from {total_rows}x{total_cols} to 60x60 constraints.")
+        working_df = loaded_df.iloc[:min(total_rows, 60), :min(total_cols, 60)].copy()
     else:
         working_df = loaded_df.copy()
 
     working_df_original = working_df.copy()
 
-    # --- AUTOMATED DATA HEALTH DIAGNOSTIC REPORT ---
+    # Diagnostic Visuals Report
     st.markdown("---")
-    st.subheader("📊 Automated Data Health & Integrity Report")
-    
-    total_nulls = int(working_df.isnull().sum().sum())
-    total_duplicates = int(working_df.duplicated().sum())
-    total_columns = len(working_df.columns)
-    current_rows = len(working_df)
-    
-    metric_col1, metric_col2, metric_col3, metric_col4 = st.columns(4)
-    with metric_col1:
-        st.metric(label="Total Rows Ingested", value=current_rows)
-    with metric_col2:
-        st.metric(label="Columns Detected", value=total_columns)
-    with metric_col3:
-        st.metric(label="Missing (Null) Cells", value=total_nulls, delta="- Action Required" if total_nulls > 0 else "Clean", delta_color="inverse" if total_nulls > 0 else "normal")
-    with metric_col4:
-        st.metric(label="Duplicate Rows Found", value=total_duplicates, delta="- Action Required" if total_duplicates > 0 else "Clean", delta_color="inverse" if total_duplicates > 0 else "normal")
+    st.subheader("📊 Engine Diagnostic Profile")
+    m1, m2, m3, m4 = st.columns(4)
+    m1.metric("Rows Processed", len(working_df))
+    m2.metric("Columns Mapped", len(working_df.columns))
+    m3.metric("Discovered Missing Cells", int(working_df.isnull().sum().sum()))
+    m4.metric("Discovered Redundant Duplicates", int(working_df.duplicated().sum()))
 
-    # --- STEP 4: CUSTOM AI COMMAND CENTER ---
+    # Processing Core Action
     st.markdown("---")
-    st.subheader("🤖 Custom AI Command Center")
-    user_instruction = st.text_input("Give a custom cleaning order (e.g., 'drop column Location', 'uppercase Category')", placeholder="Type your instruction here...")
-    
-    instruction_applied = False
-    custom_message = ""
-    
-    if user_instruction:
-        cmd = user_instruction.lower().strip()
-        try:
-            if "drop column" in cmd or "delete column" in cmd or "remove column" in cmd:
-                col_to_drop = user_instruction.split()[-1]
-                matched_cols = [c for c in working_df.columns if c.lower() == col_to_drop.lower()]
-                if matched_cols:
-                    working_df = working_df.drop(columns=matched_cols)
-                    custom_message = f"🎯 AI Command Executed: Successfully dropped column `{matched_cols[0]}`!"
-                    instruction_applied = True
-            elif "uppercase" in cmd:
-                col_to_upper = user_instruction.split()[-1]
-                matched_cols = [c for c in working_df.columns if c.lower() == col_to_upper.lower()]
-                if matched_cols:
-                    working_df[matched_cols[0]] = working_df[matched_cols[0]].astype(str).str.upper()
-                    custom_message = f"🎯 AI Command Executed: Transformed column `{matched_cols[0]}` to UPPERCASE!"
-                    instruction_applied = True
-            elif "clear nulls" in cmd or "fix nulls" in cmd:
-                working_df = working_df.dropna()
-                custom_message = "🎯 AI Command Executed: Purged rows containing missing cells completely!"
-                instruction_applied = True
-        except Exception as ai_err:
-            custom_message = f"❌ Failed to parse instruction. Error detail: {ai_err}"
-
-    if custom_message:
-        st.info(custom_message)
-
-    # --- STEP 5: AUTOMATED MODULAR PIPELINE EXECUTION ---
-    st.markdown("---")
-    st.subheader("⚙️ Processing Engine Execution Log")
-    
-    if st.button("⚡ Run Industrial Clean Engines"):
-        cleaning_progress = st.progress(0)
-        status_text = st.empty()
+    st.subheader("⚙️ Meta-Pipeline Operational Log")
+    if st.button("⚡ Trigger Universal Polymorphic Scrubbing"):
+        prog = st.progress(0)
+        log_txt = st.empty()
+        
+        log_txt.text("Phase 1: Running heuristic vector token scanning...")
+        prog.progress(30)
+        
+        log_txt.text("Phase 2: Calculating algebraic relationship correlation arrays...")
+        prog.progress(60)
         
         try:
-            status_text.text("🧼 Isolating and scrubbing mixed currency formats...")
-            if clean_strings:
-                working_df = clean_currency_and_strings(working_df)
-            cleaning_progress.progress(25)
-            
-            status_text.text("🧠 Re-calculating empty metrics and enforcing non-negative boundaries...")
-            if smart_impute:
-                working_df = clean_context_imputation(working_df)
-            cleaning_progress.progress(50)
-            
-            status_text.text("📐 Executing financial cross-column audits...")
-            if math_validate:
-                if 'Price Per Unit' in working_df.columns and 'Quantity' in working_df.columns and 'Total Spent' in working_df.columns:
-                    calculated_spent = working_df['Price Per Unit'] * working_df['Quantity']
-                    discrepancy_mask = (working_df['Total Spent'] - calculated_spent).abs() > 0.01
-                    working_df.loc[discrepancy_mask, 'Total Spent'] = calculated_spent.loc[discrepancy_mask]
-            cleaning_progress.progress(70)
-            
-            status_text.text("📊 Applying IQR outlier logic and processing dates...")
-            if fix_nulls:
-                numeric_fields = working_df.select_dtypes(include=['number']).columns
-                for field in numeric_fields:
-                    working_df[field] = working_df[field].fillna(working_df[field].median())
-            
-            if purge_dupes:
-                working_df = working_df.drop_duplicates()
-                
-            if stat_outliers:
-                numeric_fields = working_df.select_dtypes(include=['number']).columns
-                for field in numeric_fields:
-                    q1 = working_df[field].quantile(0.25)
-                    q3 = working_df[field].quantile(0.75)
-                    iqr = q3 - q1
-                    working_df = working_df[(working_df[field] >= (q1 - 1.5 * iqr)) & (working_df[field] <= (q3 + 1.5 * iqr))]
-                    
-            if date_standard:
-                for field in working_df.columns:
-                    if 'date' in field.lower() or 'time' in field.lower():
-                        working_df[field] = pd.to_datetime(working_df[field], errors='coerce').dt.strftime('%Y-%m-%d')
-            
-            cleaning_progress.progress(100)
-            status_text.success("✨ Industrial scrubbing pipeline executed successfully with 0 exceptions!")
-            
-        except Exception as pipeline_error:
-            st.error(f"❌ Critical Exception during processing step: {pipeline_error}")
+            working_df = execute_polymorphic_cleaning(working_df, flags)
+            prog.progress(100)
+            log_txt.success("✨ Engine successfully normalized the target matrix with zero exceptions!")
+        except Exception as err:
+            st.error(f"Pipeline Interruption: {err}")
 
-    # --- VISUAL COMPARISON INTERFACE ---
-    display_visual_comparison(working_df_original, working_df)
-    
-    # --- STEP 6: SQL BACKEND INDEXING ---
+    # Side by side delta tracking engine view
+    st.markdown("### 🔄 Core Delta Engine Matrix Validation")
+    col_orig, col_clean = st.columns(2)
+    with col_orig:
+        st.markdown("**📋 Ingested Matrix Frame**")
+        st.dataframe(working_df_original.head(10))
+    with col_clean:
+        st.markdown("**✨ Sanitized Engine Output**")
+        try:
+            styled = working_df.head(10).reset_index(drop=True).style.apply(
+                lambda x: np.where(working_df_original.head(10).reset_index(drop=True) != working_df.head(10).reset_index(drop=True), 'background-color: rgba(46, 204, 113, 0.25)', ''), axis=None
+            )
+            st.dataframe(styled)
+        except:
+            st.dataframe(working_df.head(10))
+
     if push_to_database:
         try:
-            db_connection = sqlite3.connect("retail_analytics.db")
-            working_df.to_sql("clean_transactions", db_connection, if_exists="replace", index=False)
-            db_connection.close()
-            st.sidebar.info("🚀 Relational table updated in SQLite.")
-        except Exception as database_error:
-            st.sidebar.error(f"Database Exception: {database_error}")
+            conn = sqlite3.connect("universal_analytics.db")
+            working_df.to_sql("sanitized_ledger", conn, if_exists="replace", index=False)
+            conn.close()
+            st.sidebar.info("🚀 Indexed into local SQLite.")
+        except Exception as dbe:
+            st.sidebar.error(f"Database Exception: {dbe}")
 
-    # --- STEP 7: SECURE SPREADSHEET EXPORT ENGINE ---
     st.markdown("---")
-    st.subheader("💾 Export Clean Dataset")
-    
-    if file_format_csv:
-        csv_stream = working_df.to_csv(index=False).encode('utf-8')
-        st.download_button(label="📥 Download Clean CSV File", data=csv_stream, file_name=f"cleaned_{my_raw_file.name}", mime="text/csv")
+    st.subheader("💾 Export Sanitized Frame")
+    if is_csv:
+        st.download_button("📥 Download Universal Clean CSV", data=working_df.to_csv(index=False).encode('utf-8'), file_name=f"sanitized_{my_raw_file.name}", mime="text/csv")
     else:
-        memory_buffer = io.BytesIO()
-        with pd.ExcelWriter(memory_buffer, engine='openpyxl') as excel_writer:
-            working_df.to_excel(excel_writer, index=False, sheet_name='Cleaned Data Output')
-        st.download_button(label="📥 Download Clean Excel File", data=memory_buffer.getvalue(), file_name=f"cleaned_{my_raw_file.name}", mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")
+        buf = io.BytesIO()
+        with pd.ExcelWriter(buf, engine='openpyxl') as w:
+            working_df.to_excel(w, index=False, sheet_name='Sanitized Frame')
+        st.download_button("📥 Download Universal Clean Excel", data=buf.getvalue(), file_name=f"sanitized_{my_raw_file.name}", mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")
 
-# --- STEP 8: USER EXPERIENCE FEEDBACK HUB ---
+# Feedback Terminal Block
 st.markdown("---")
-st.subheader("⭐ User Experience Feedback Hub")
-col1, col2 = st.columns([1, 1])
-
-with col1:
-    st.markdown("### Share Your Experience")
-    user_rating = st.slider("Rate the Data Janitor Engine (1 = Poor, 5 = Elite)", 1, 5, 5)
-    user_review = st.text_area("What features or adjustments would make this app better for your daily workflow?")
-    
-    if st.button("Submit Anonymous Feedback 🚀"):
-        if user_review.strip() != "":
-            timestamp = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-            log_entry = f"[{timestamp}] Rating: {user_rating}/5 | Feedback: {user_review}\n"
-            with open("user_feedback_vault.txt", "a") as vault_file:
-                vault_file.write(log_entry)
-            st.success("Thank you! Your recommendations have been safely transmitted directly to our engineering roadmap.")
-
-with col2:
-    st.markdown("### 🔒 Private Administrator Dashboard")
+st.subheader("⭐ System Feedback Terminal")
+fa, fb = st.columns(2)
+with fa:
+    rating = st.slider("Rate Engine Performance", 1, 5, 5)
+    review = st.text_area("Log structural enhancement requests directly to the core engineering roadmap:")
+    if st.button("Transmit Feedback 🚀") and review.strip():
+        with open("user_feedback_vault.txt", "a") as f:
+            f.write(f"[{datetime.datetime.now()}] Rating: {rating}/5 | Log: {review}\n")
+        st.success("Log safely transmitted.")
+with fb:
+    st.markdown("### 🔒 Encrypted Root Panel")
     if has_full_access and login_user == "admin":
-        st.write("Welcome back, Admin. User reviews:")
         if os.path.exists("user_feedback_vault.txt"):
-            with open("user_feedback_vault.txt", "r") as vault_file:
-                feedback_records = vault_file.readlines()
-            for record in reversed(feedback_records):
-                st.info(record)
+            with open("user_feedback_vault.txt", "r") as f:
+                st.text(f.read())
         else:
-            st.info("No feedback records logged.")
+            st.info("No logs present in vault.")
     else:
-        st.info("🔒 Admin panel encrypted. Log in with Master Admin credentials to view core feedback data streams.")
+        st.info("🔒 Secure Admin configuration locked. Access requires Root Master authentication.")
