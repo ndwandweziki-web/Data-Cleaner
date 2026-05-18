@@ -39,13 +39,13 @@ def init_secure_database():
     cursor.execute('''
         CREATE TABLE IF NOT EXISTS secure_users (
             username TEXT PRIMARY KEY,
-            password_hash TEXT NOT None
+            password_hash TEXT NOT NULL
         )
     ''')
     cursor.execute('''
         CREATE TABLE IF NOT EXISTS active_sessions (
             username TEXT PRIMARY KEY,
-            last_activity REAL NOT None
+            last_activity REAL NOT NULL
         )
     ''')
     
@@ -249,7 +249,6 @@ elif user_tier == "🌟 Register Secure Passkey":
     reg_pass = st.sidebar.text_input("Create Private Passkey", type="password")
     invite_code = st.sidebar.text_input("Enterprise Verification Pass", type="password")
     if st.sidebar.button("Register Key Node 🚀"):
-        # Cryptographically compare invite key signatures with master hash of "123Shelby@"
         if hash_passkey(invite_code) == "26777aad87c7342827e73f9aa735b5fcbc54d52651a95a9cf3e314222f0ff73c":
             if reg_user.strip() and reg_pass.strip():
                 register_secure_user(reg_user, reg_pass)
@@ -278,7 +277,7 @@ elif user_tier == "Premium Member / Admin Login":
             if login_pass != "":
                 st.sidebar.error("❌ Security Violation: Invalid signature credentials.")
 
-# --- STEP 2: MAIN DASHBOARD AND PIPELINE SETTINGS ---
+# --- STEP 2: MAIN ENGINE CONTROL LAYER ---
 st.title("🧬 Autonomous Polymorphic Meta-Engine & Reproducibility Suite")
 st.write("An advanced self-correcting data cleaning engine that logs, audits, and normalizes unstructured files.")
 
@@ -306,7 +305,6 @@ if my_raw_file is not None:
 
     total_rows, total_cols = len(loaded_df), len(loaded_df.columns)
     
-    # Enforce premium constraints check
     if not has_full_access and (total_rows > 60 or total_cols > 60):
         st.warning(f"⚠️ **Free Tier Slicer Active:** Structural view capped down to 60x60 dimensions.")
         working_df = loaded_df.iloc[:min(total_rows, 60), :min(total_cols, 60)].copy()
@@ -324,7 +322,7 @@ if my_raw_file is not None:
     m3.metric("Missing Cell Points", int(working_df.isnull().sum().sum()))
     m4.metric("Redundant Duplicates", int(working_df.duplicated().sum()))
 
-    # Processing Core Action (Implementing Memory-Isolated Chunked Streaming)
+    # Processing Core Action
     st.markdown("---")
     st.subheader("⚙️ Meta-Pipeline Operational Log")
     if st.button("⚡ Trigger Universal Polymorphic Scrubbing"):
@@ -338,17 +336,14 @@ if my_raw_file is not None:
         prog.progress(25)
         
         try:
-            # Memory chunk size allocation configuration
             chunk_size = 5000
             chunks_accumulator = []
             
-            # Map chunk parameters across the input dataframe
             for start_idx in range(0, len(working_df), chunk_size):
                 chunk_slice = working_df.iloc[start_idx : start_idx + chunk_size].copy()
                 cleaned_slice = execute_polymorphic_cleaning(chunk_slice, flags)
                 chunks_accumulator.append(cleaned_slice)
             
-            # Consolidate processed data vectors
             working_df = pd.concat(chunks_accumulator, ignore_index=True)
             prog.progress(100)
             log_txt.success("✨ Engine successfully normalized the target matrix using isolated chunk streams!")
@@ -397,7 +392,6 @@ if my_raw_file is not None:
     with ex2:
         st.markdown("#### 🚀 Enterprise Typing Asset")
         parquet_buf = io.BytesIO()
-        # Exporting to Parquet to perfectly preserve complex database column datatypes
         working_df.to_parquet(parquet_buf, index=False)
         st.download_button("📥 Download Strict Parquet Schema Asset", data=parquet_buf.getvalue(), file_name=f"sanitized_{os.path.splitext(my_raw_file.name)[0]}.parquet", mime="application/octet-stream")
     with ex3:
