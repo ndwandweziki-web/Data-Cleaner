@@ -10,7 +10,7 @@ import re
 import hashlib
 
 # Enterprise UI Configuration
-st.set_page_config(page_title="Data Janitor Pro Meta-Engine v4.4", page_icon="🧬", layout="wide")
+st.set_page_config(page_title="Data Janitor Pro Meta-Engine v4.5", page_icon="🧬", layout="wide")
 
 # Initialize Session-Based Audit Ledger & State
 if 'audit_log' not in st.session_state:
@@ -55,17 +55,6 @@ def init_secure_database():
 
 def hash_passkey(passkey):
     return hashlib.sha256(passkey.strip().encode('utf-8')).hexdigest()
-
-def register_secure_user(username, password):
-    conn = sqlite3.connect(DB_FILE, timeout=30.0)
-    conn.execute('PRAGMA journal_mode=WAL;')
-    try:
-        cursor = conn.cursor()
-        cursor.execute('INSERT OR REPLACE INTO secure_users (username, password_hash) VALUES (?, ?)', 
-                       (username.lower().strip(), hash_passkey(password)))
-        conn.commit()
-    finally:
-        conn.close()
 
 def authenticate_session(username, password):
     conn = sqlite3.connect(DB_FILE, timeout=30.0)
@@ -180,7 +169,7 @@ def execute_polymorphic_cleaning(df, config_flags, global_rules=None):
                     pass
             df_clean[col] = df_clean[col].astype(str).str.strip().str.title()
 
-    # 2. Dynamic Algebraic Imputation Loop (🎯 TYPO FIX COMPLETED HERE)
+    # 2. Dynamic Algebraic Imputation Loop (Fixed mask cross-references)
     active_rules = global_rules if global_rules is not None else (discover_algebraic_identities(df_clean, numeric_cols) if config_flags['smart_impute'] else [])
     
     if config_flags['smart_impute'] and active_rules:
@@ -227,67 +216,50 @@ def execute_polymorphic_cleaning(df, config_flags, global_rules=None):
 
     return df_clean
 
-# --- STEP 1: AUTHENTICATION INTERFACE NODE ---
-st.sidebar.header("🔑 Cryptographic Authentication")
-user_tier = st.sidebar.radio("Authorization Node", ["Free / Guest User", "Premium Member / Admin Login", "🌟 Register Secure Passkey"])
+# --- STEP 1: HIDDEN ADMIN GATEWAY ---
+st.sidebar.header("🔒 System Console")
+show_admin = st.sidebar.checkbox("Open Administrator Portal")
 
-has_full_access = False
+is_admin_active = False
 
-if user_tier == "Free / Guest User":
-    if st.session_state.current_logged_user:
-        manage_session_block(st.session_state.current_logged_user, action="logout")
-        st.session_state.current_logged_user = None
-    st.sidebar.info("ℹ️ Free tier limited to maximum 60 rows × 60 columns processing slice.")
-
-elif user_tier == "🌟 Register Secure Passkey":
-    reg_user = st.sidebar.text_input("Choose Username")
-    reg_pass = st.sidebar.text_input("Create Private Passkey", type="password")
-    invite_code = st.sidebar.text_input("Enterprise Verification Pass", type="password")
-    if st.sidebar.button("Register Key Node 🚀"):
-        if hash_passkey(invite_code) == MASTER_CRYPTO_HASH:
-            if reg_user.strip() and reg_pass.strip():
-                register_secure_user(reg_user, reg_pass)
-                st.sidebar.success("✔️ Cryptographic signature saved. Proceed to Login node.")
-            else:
-                st.sidebar.error("❌ Credentials cannot be left empty.")
-        else:
-            st.sidebar.error("❌ Verification failed: Unauthorized invitation code signature.")
-
-elif user_tier == "Premium Member / Admin Login":
-    login_user_input = st.sidebar.text_input("Username").lower().strip()
-    login_pass = st.sidebar.text_input("Enter Passkey", type="password")
+if show_admin:
+    login_user_input = st.sidebar.text_input("Admin Username").lower().strip()
+    login_pass = st.sidebar.text_input("Master Passkey", type="password")
     if login_user_input and login_pass:
         if authenticate_session(login_user_input, login_pass):
             if st.session_state.current_logged_user == login_user_input:
-                has_full_access = True
-                st.sidebar.success(f"🔥 Secure Node Active: Welcome back, {login_user_input.title()}.")
+                is_admin_active = True
+                st.sidebar.success("🔥 Root Node Active.")
             else:
                 if manage_session_block(login_user_input, action="login"):
                     st.session_state.current_logged_user = login_user_input
-                    has_full_access = True
-                    st.sidebar.success(f"🔥 Session Authenticated: Welcome, {login_user_input.title()}.")
+                    is_admin_active = True
+                    st.sidebar.success("🔥 System Authenticated.")
                 else:
                     st.sidebar.error("🚨 Collision Block: Account session active on another device node.")
         else:
             if login_pass != "":
-                st.sidebar.error("❌ Security Violation: Invalid signature credentials.")
+                st.sidebar.error("❌ Access Denied.")
+else:
+    if st.session_state.current_logged_user:
+        manage_session_block(st.session_state.current_logged_user, action="logout")
+        st.session_state.current_logged_user = None
 
-# --- STEP 2: MAIN ENGINE CONTROL LAYER ---
-st.title("🧬 Autonomous Polymorphic Meta-Engine & Reproducibility Suite")
-st.write("An advanced self-correcting data cleaning engine that logs, audits, and normalizes unstructured files.")
+# --- STEP 2: MAIN DASHBOARD FRONTEND ---
+st.title("🧬 Data Janitor Pro: The Autonomous Meta-Engine")
+st.write("An advanced self-correcting data cleaning suite open for free public processing.")
 
-with st.expander("📖 Interactive Enterprise User Manual & Operations Guide", expanded=False):
+with st.expander("📖 Interactive Operations Guide & System Manual", expanded=False):
     st.markdown("""
     ### Welcome to Data Janitor Pro
-    This application is an autonomous data parsing tool engineered to automatically profile data types, reconstruct accounting errors, and flag anomalies without requiring hardcoded user configuration.
+    This application is an autonomous data parsing tool engineered to automatically profile data types, reconstruct accounting errors, and flag anomalies completely for free.
     
     #### 🛠️ Operational Steps:
-    1. **Authentication (Sidebar):** Free/Guest uploads are capped at a maximum 60 rows × 60 columns. To process unlimited row files, select **Premium Member Login**, and enter your authorized credentials.
-    2. **Drop Your File:** Upload any messy or unformatted `.csv` or `.xlsx` spreadsheet into the file drop target below.
-    3. **Configure Meta-Directives:** Use the checkboxes in the left-hand configuration panel to activate or isolate specific algorithm routines.
-    4. **Trigger Processing:** Click the **⚡ Trigger Universal Polymorphic Scrubbing** button. The engine will divide the data array into safe memory batches and execute updates.
-    5. **Review Validation Views:** Evaluate changes side-by-side. Modified or imputed record fields are highlighted in green.
-    6. **Export Assets:** Download your clean flat-file data assets, advanced schema-preserving `.parquet` assets, or your legal transparency audit trail log.
+    1. **Drop Your File:** Upload any messy or unformatted `.csv` or `.xlsx` spreadsheet into the file drop target below.
+    2. **Configure Meta-Directives:** Use the checkboxes in the left-hand configuration panel to activate or isolate specific algorithm routines.
+    3. **Trigger Processing:** Click the **⚡ Trigger Universal Polymorphic Scrubbing** button.
+    4. **Review Validation Views:** Evaluate changes side-by-side. Modified or imputed fields are highlighted in green.
+    5. **Export Assets:** Download your clean flat-file data assets, advanced schema-preserving `.parquet` assets, or your transparency audit trail log.
     """)
 
 st.sidebar.markdown("---")
@@ -323,14 +295,8 @@ if my_raw_file is not None:
         st.error(f"❌ Corrupt File Architecture: {e}")
         st.stop()
 
-    total_rows, total_cols = len(loaded_df), len(loaded_df.columns)
-    
-    if not has_full_access and (total_rows > 60 or total_cols > 60):
-        st.warning(f"⚠️ **Free Tier Slicer Active:** Structural view capped down to 60x60 dimensions.")
-        working_df = loaded_df.iloc[:min(total_rows, 60), :min(total_cols, 60)].copy()
-    else:
-        working_df = loaded_df.copy()
-
+    # Public Access Matrix Config (Unlimited scaling unlocked)
+    working_df = loaded_df.copy()
     working_df_original = working_df.copy()
 
     # Diagnostic Visuals Profile Report
@@ -350,7 +316,7 @@ if my_raw_file is not None:
         log_txt = st.empty()
         
         st.session_state.audit_log = [] 
-        log_audit_event("Ingested File Instance", f"Filename: {my_raw_file.name} | Dimensions: {total_rows}x{total_cols}")
+        log_audit_event("Ingested File Instance", f"Filename: {my_raw_file.name} | Dimensions: {len(working_df)}x{len(working_df.columns)}")
         
         log_txt.text("Phase 1: Analyzing global sample mapping to preserve cross-chunk identities...")
         prog.progress(10)
@@ -409,7 +375,7 @@ if my_raw_file is not None:
             conn = sqlite3.connect("universal_analytics.db")
             working_df.to_sql("sanitized_ledger", conn, if_exists="replace", index=False)
             conn.close()
-            st.sidebar.info("🚀 Indexed into local SQLite database with concurrent WAL controls.")
+            st.sidebar.info("🚀 Indexed into local SQLite database.")
         except Exception as dbe:
             st.sidebar.error(f"Database Exception: {dbe}")
 
@@ -435,7 +401,7 @@ if my_raw_file is not None:
         audit_json = json.dumps(st.session_state.audit_log, indent=2)
         st.download_button("📥 Download Reproducible Audit Log (.json)", data=audit_json, file_name=f"audit_trail_{datetime.date.today()}.json", mime="application/json")
 
-# System Feedback Terminal Block (🎯 Fixed undefined user login context variables here)
+# System Feedback Terminal Block
 st.markdown("---")
 st.subheader("⭐ System Feedback Terminal")
 fa, fb = st.columns(2)
@@ -449,7 +415,7 @@ with fa:
 with fb:
     st.markdown("### 🔒 Private Administrator Logging Port")
     current_session_user = st.session_state.get('current_logged_user', '')
-    if has_full_access and current_session_user == "admin":
+    if show_admin and is_admin_active and current_session_user == "admin":
         if os.path.exists("user_feedback_vault.txt"):
             with open("user_feedback_vault.txt", "r") as f:
                 st.text(f.read())
