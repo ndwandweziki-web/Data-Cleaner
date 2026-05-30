@@ -358,18 +358,14 @@ def execute_cleaning(df: pd.DataFrame, numeric_cols: List[str], text_cols: List[
     """Execute full cleaning pipeline."""
     df_clean = df.copy()
     
-    # Profile types
     col_types = profile_types(df_clean)
     
-    # Clean columns
     df_clean = clean_numeric(df_clean, numeric_cols)
     df_clean = clean_text(df_clean, text_cols)
     
-    # Discover and impute
     algebraic_ids = discover_identities(df_clean, numeric_cols)
     df_clean = impute_nulls(df_clean, col_types, algebraic_ids)
     
-    # Flag outliers
     df_clean = flag_outliers(df_clean, numeric_cols)
     
     return df_clean
@@ -383,7 +379,6 @@ st.title("🧹 Data Janitor Pro: Meta-Engine v5.0")
 
 is_admin = render_login()
 
-# File upload
 uploaded_file = st.file_uploader("Upload CSV or Excel file", type=["csv", "xlsx"])
 
 if uploaded_file:
@@ -400,7 +395,6 @@ if uploaded_file:
     type_summary = pd.DataFrame(list(col_types.items()), columns=["Column", "Detected Type"])
     st.dataframe(type_summary)
 
-    # Get numeric and text columns
     numeric_cols = [col for col, ctype in col_types.items() if ctype == "numeric"]
     text_cols = [col for col, ctype in col_types.items() if ctype in ["categorical_text", "system_key"]]
 
@@ -408,4 +402,18 @@ if uploaded_file:
     col1, col2 = st.columns(2)
 
     with col1:
-        clean_numeric_flag = st.checkbox("Clean numeric
+        clean_numeric_flag = st.checkbox("Clean numeric columns", value=True)
+        clean_text_flag = st.checkbox("Clean text columns", value=True)
+        impute_flag = st.checkbox("Impute null values", value=True)
+
+    with col2:
+        flag_outliers_flag = st.checkbox("Flag outliers", value=True)
+        show_algebraic = st.checkbox("Show algebraic identities", value=False)
+
+    if st.button("🚀 Execute Cleaning Pipeline"):
+        with st.spinner("Cleaning data..."):
+            df_cleaned = execute_cleaning(df, numeric_cols, text_cols)
+            st.session_state.df_current = df_cleaned
+            log_audit("CLEANING_EXECUTED", f"Columns processed: {len(df.columns)}")
+
+        st.success("✅
