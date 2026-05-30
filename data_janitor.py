@@ -7,26 +7,20 @@ import streamlit as st
 import pandas as pd
 import numpy as np
 import sqlite3
-import io
-import os
 import datetime
 import json
 import re
 import hashlib
-from typing import Dict, List, Tuple, Optional
-from dataclasses import dataclass
-from enum import Enum
+from typing import Dict, List, Tuple
 
 # ============================================================================
-# CONFIG & CONSTANTS
+# CONFIG
 # ============================================================================
 
-SESSION_TIMEOUT = 900  # 15 mins
+SESSION_TIMEOUT = 900
 CHUNK_SIZE = 5000
 DATE_REGEX = r'^\d{4}[-/]\d{2}[-/]\d{2}'
-DATE_REGEX_ALT = r'\d{2}/'
 CURRENCY_SYMS = ['R', '$', '€', '£']
-NULL_VARIANTS = ['Nan', 'None', 'Null', '']
 NULL_REPLACE = "Unspecified Field"
 IQR_MULT = 1.5
 NUMERIC_THRESHOLD = 0.6
@@ -36,38 +30,38 @@ DATE_THRESHOLD = 0.5
 ALGEBRAIC_RTOL = 1e-2
 ALGEBRAIC_ATOL = 1e-2
 SAMPLE_LIMIT = 100
-DB_FILE = "janitor_enterprise_vault.db"
-ANALYTICS_DB = "universal_analytics.db"
-
+DB_FILE = "janitor_vault.db"
 
 # ============================================================================
-# SESSION STATE
+# SESSION INIT
 # ============================================================================
 
 def init_session():
-    """Initialize session state variables."""
+    """Initialize session state."""
     if 'audit_log' not in st.session_state:
         st.session_state.audit_log = []
     if 'current_logged_user' not in st.session_state:
         st.session_state.current_logged_user = None
+    if 'df_current' not in st.session_state:
+        st.session_state.df_current = None
     if 'cleaning_history' not in st.session_state:
         st.session_state.cleaning_history = []
 
+init_session()
 
 # ============================================================================
-# DATABASE OPERATIONS
+# DATABASE
 # ============================================================================
 
-def get_db_connection():
-    """Get SQLite connection with WAL mode."""
+def get_db():
+    """Get database connection."""
     conn = sqlite3.connect(DB_FILE, timeout=30.0)
     conn.execute('PRAGMA journal_mode=WAL;')
     return conn
 
-
-def init_db():
+def setup_db():
     """Initialize database tables."""
-    conn = get_db_connection()
+    conn = get_db()
     cursor = conn.cursor()
 
     cursor.execute('''
@@ -84,94 +78,87 @@ def init_db():
         )
     ''')
 
+    # Insert default admin
     master_hash = "26777aad87c7342827e73f9aa735b5fcbc54d52651a95a9cf3e314222f0ff73c"
     cursor.execute(
-        'INSERT OR IGNORE INTO secure_users (username, password_hash) VALUES (?, ?)',
+        'INSERT OR IGNORE INTO secure_users VALUES (?, ?)',
         ('admin', master_hash)
     )
     conn.commit()
     conn.close()
 
+try:
+    setup_db()
+except Exception as e:
+    st.error(f"Database error: {e}")
+
+# ============================================================================
+# AUTH
+# ============================================================================
 
 def hash_pwd(pwd: str) -> str:
-    """Hash password with SHA256."""
-    return hashlib.sha256(pwd.strip().encode('utf-8')).hexdigest()
-
+    """Hash password."""
+    return hashlib.sha256(pwd.strip().encode()).hexdigest()
 
 def auth_user(username: str, password: str) -> bool:
-    """Verify user credentials."""
+    """Authenticate user."""
     username = username.lower().strip()
     pwd_hash = hash_pwd(password)
 
-    conn = get_db_connection()
-    cursor = conn.cursor()
-    cursor.execute(
-        'SELECT password_hash FROM secure_users WHERE username = ?',
-        (username,)
-    )
-    row = cursor.fetchone()
-    conn.close()
-
-    return row is not None and row[0] == pwd_hash
-
+    try:
+        conn = get_db()
+        cursor = conn.cursor()
+        cursor.execute('SELECT password_hash FROM secure_users WHERE username = ?', (username,))
+        row = cursor.fetchone()
+        conn.close()
+        return row is not None and row[0] == pwd_hash
+    except Exception:
+        return False
 
 def manage_session(username: str, action: str = "login") -> bool:
-    """Handle user session login/logout."""
+    """Manage user sessions."""
     username = username.lower().strip()
     current_time = datetime.datetime.now().timestamp()
 
-    conn = get_db_connection()
-    cursor = conn.cursor()
-
-    # Clean expired sessions
-    cursor.execute(
-        'DELETE FROM active_sessions WHERE ? - last_activity > ?',
-        (current_time, SESSION_TIMEOUT)
-    )
-
-    if action == "login":
-        cursor.execute(
-            'SELECT username FROM active_sessions WHERE username = ?',
-            (username,)
-        )
-        if cursor.fetchone():
-            conn.close()
-            return False
-
-        cursor.execute(
-            'INSERT OR REPLACE INTO active_sessions (username, last_activity) VALUES (?, ?)',
-            (username, current_time)
-        )
-
-    elif action == "logout":
-        cursor.execute(
-            'DELETE FROM active_sessions WHERE username = ?',
-            (username,)
-        )
-
-    conn.commit()
-    conn.close()
-    return True
-
-
-def save_analytics(df: pd.DataFrame, table_name: str = "sanitized_ledger") -> bool:
-    """Save cleaned data to analytics database."""
     try:
-        conn = sqlite3.connect(ANALYTICS_DB)
-        df.to_sql(table_name, conn, if_exists="replace", index=False)
+        conn = get_db()
+        cursor = conn.cursor()
+
+        cursor.execute('DELETE FROM active_sessions WHERE ? - last_activity > ?',
+                      (current_time, SESSION_TIMEOUT))
+
+        if action == "login":
+            cursor.execute('SELECT username FROM active_sessions WHERE username = ?', (username,))
+            if cursor.fetchone():
+                conn.close()
+                return False
+            cursor.execute('INSERT OR REPLACE INTO active_sessions VALUES (?, ?)',
+                          (username, current_time))
+
+        elif action == "logout":
+            cursor.execute('DELETE FROM active_sessions WHERE username = ?', (username,))
+
+        conn.commit()
         conn.close()
         return True
-    except Exception as e:
-        st.error(f"Analytics save failed: {str(e)}")
+    except Exception:
         return False
 
+def log_audit(action: str, details: str = ""):
+    """Log audit event."""
+    timestamp = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    st.session_state.audit_log.append({
+        "timestamp": timestamp,
+        "action": action,
+        "details": details
+    })
 
 # ============================================================================
-# AUTHENTICATION UI
+# LOGIN UI
 # ============================================================================
 
-def render_login_panel() -> bool:
-    """Render admin login in sidebar. Returns True if authenticated."""
+def render_login() -> bool:
+    """Render admin login panel."""
     st.sidebar.header("🔐 System Console")
     show_admin = st.sidebar.checkbox("Open Administrator Portal")
 
@@ -192,87 +179,48 @@ def render_login_panel() -> bool:
         if manage_session(username, action="login"):
             st.session_state.current_logged_user = username
             st.sidebar.success("✅ Root Node Active.")
-            log_audit("LOGIN_SUCCESS", f"User: {username}")
+            log_audit("LOGIN", f"User: {username}")
             return True
         else:
-            st.sidebar.error("⚠️ Collision Block: Account session active on another device.")
+            st.sidebar.error("⚠️ Session collision detected.")
             return False
     else:
         st.sidebar.error("❌ Access Denied.")
-        log_audit("LOGIN_FAILED", f"Attempted user: {username}")
+        log_audit("LOGIN_FAIL", f"User: {username}")
         return False
 
-
-def logout_user():
-    """Logout current user."""
-    if st.session_state.current_logged_user:
-        manage_session(st.session_state.current_logged_user, action="logout")
-        log_audit("LOGOUT", f"User: {st.session_state.current_logged_user}")
-        st.session_state.current_logged_user = None
-
-
 # ============================================================================
-# AUDIT LOGGING
+# TYPE DETECTION
 # ============================================================================
 
-def log_audit(action: str, details: str = ""):
-    """Log audit event."""
-    timestamp = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-    event = {
-        "timestamp": timestamp,
-        "action": action,
-        "details": details
-    }
-    st.session_state.audit_log.append(event)
-
-
-def export_audit_log() -> str:
-    """Export audit log as JSON."""
-    return json.dumps(st.session_state.audit_log, indent=2)
-
-
-# ============================================================================
-# DATA PROFILING & TYPE DETECTION
-# ============================================================================
-
-def detect_column_type(series: pd.Series) -> str:
-    """Detect semantic type of a column."""
+def detect_type(series: pd.Series) -> str:
+    """Detect column semantic type."""
     sample = series.dropna().head(SAMPLE_LIMIT).astype(str).str.strip()
 
     if sample.empty:
         return "empty"
 
-    # Check for date
+    # Date check
     date_pattern = re.compile(DATE_REGEX)
-    date_alt_pattern = re.compile(DATE_REGEX_ALT)
-
-    date_matches = sum(
-        1 for x in sample
-        if date_pattern.match(x) or date_alt_pattern.search(x)
-    )
-
+    date_matches = sum(1 for x in sample if date_pattern.match(x))
     if len(sample) > 0 and date_matches / len(sample) > DATE_THRESHOLD:
         return "date"
 
-    # Check for numeric/currency
-    currency_matches = sum(
-        1 for x in sample
-        if any(sym in x for sym in CURRENCY_SYMS)
-    )
-
+    # Numeric/currency check
+    currency_matches = sum(1 for x in sample if any(sym in x for sym in CURRENCY_SYMS))
     numeric_clean = pd.to_numeric(
         series.astype(str).str.replace(r'[R\$\s,€£]', '', regex=True),
         errors='coerce'
     )
-    valid_numeric = numeric_clean.notnull().sum() / len(series) if len(series) > 0 else 0
+    valid_ratio = numeric_clean.notnull().sum() / len(series) if len(series) > 0 else 0
 
-    if (valid_numeric > NUMERIC_THRESHOLD or
+    if (valid_ratio > NUMERIC_THRESHOLD or
             currency_matches / len(sample) > CURRENCY_THRESHOLD):
         return "numeric"
 
-    # Check for system key
+    # System key check
     unique_ratio = series.nunique() / len(series) if len(series) > 0 else 0
-    col_lower = series.name.lower() if series.name else ""
+    col_lower = (series.name or "").lower()
 
     if unique_ratio > UNIQUE_THRESHOLD and any(
         token in col_lower for token in ['id', 'key', 'code', 'pk']
@@ -281,27 +229,16 @@ def detect_column_type(series: pd.Series) -> str:
 
     return "categorical_text"
 
-
-def profile_df_types(df: pd.DataFrame) -> Dict[str, str]:
-    """Profile all columns and return type mapping."""
-    profiles = {}
-    for col in df.columns:
-        profiles[col] = detect_column_type(df[col])
-    return profiles
-
+def profile_types(df: pd.DataFrame) -> Dict[str, str]:
+    """Profile all columns."""
+    return {col: detect_type(df[col]) for col in df.columns}
 
 # ============================================================================
-# ALGEBRAIC IDENTITY DISCOVERY
+# CLEANING FUNCTIONS
 # ============================================================================
 
-def discover_algebraic_identities(
-    df: pd.DataFrame,
-    numeric_cols: List[str]
-) -> List[Tuple[str, str, str, str]]:
-    """
-    Discover algebraic relationships in numeric columns.
-    Returns list of (rule_type, col_a, col_b, col_c) tuples.
-    """
+def discover_identities(df: pd.DataFrame, numeric_cols: List[str]) -> List[Tuple]:
+    """Discover algebraic relationships."""
     identities = []
 
     if len(numeric_cols) < 3:
@@ -326,23 +263,16 @@ def discover_algebraic_identities(
                 val_b = test_df[col_b].values
                 val_c = test_df[col_c].values
 
-                # Check multiply relationship
                 if np.allclose(val_a * val_b, val_c, rtol=ALGEBRAIC_RTOL, atol=ALGEBRAIC_ATOL):
                     identities.append(("multiply", col_a, col_b, col_c))
 
-                # Check add relationship
                 elif np.allclose(val_a + val_b, val_c, rtol=ALGEBRAIC_RTOL, atol=ALGEBRAIC_ATOL):
                     identities.append(("add", col_a, col_b, col_c))
 
     return identities
 
-
-# ============================================================================
-# NUMERIC CLEANING
-# ============================================================================
-
 def clean_numeric(df: pd.DataFrame, numeric_cols: List[str]) -> pd.DataFrame:
-    """Clean numeric columns by removing currency symbols."""
+    """Clean numeric columns."""
     df_clean = df.copy()
 
     for col in numeric_cols:
@@ -355,72 +285,48 @@ def clean_numeric(df: pd.DataFrame, numeric_cols: List[str]) -> pd.DataFrame:
 
     return df_clean
 
-
-# ============================================================================
-# TEXT CLEANING
-# ============================================================================
-
 def clean_text(df: pd.DataFrame, text_cols: List[str]) -> pd.DataFrame:
-    """Clean text columns by standardizing formatting."""
+    """Clean text columns."""
     df_clean = df.copy()
 
     for col in text_cols:
-        # Replace underscores if common
         underscore_ratio = df_clean[col].astype(str).str.contains('_').sum() / len(df_clean)
         if underscore_ratio > 0.4:
             df_clean[col] = df_clean[col].astype(str).str.replace('_', ' ', regex=False)
 
-        # Clean whitespace and title case
         df_clean[col] = df_clean[col].astype(str).str.strip().str.title()
 
     return df_clean
 
-
-# ============================================================================
-# NULL VALUE IMPUTATION
-# ============================================================================
-
-def impute_nulls(
-    df: pd.DataFrame,
-    col_type_map: Dict[str, str],
-    algebraic_ids: List[Tuple[str, str, str, str]]
-) -> pd.DataFrame:
-    """Impute null values based on column type and algebraic rules."""
+def impute_nulls(df: pd.DataFrame, col_type_map: Dict[str, str], algebraic_ids: List[Tuple]) -> pd.DataFrame:
+    """Impute null values."""
     df_impute = df.copy()
 
-    # Use algebraic rules for imputation
     for rule_type, col_a, col_b, col_c in algebraic_ids:
         mask_a = df_impute[col_a].isna()
         mask_b = df_impute[col_b].isna()
         mask_c = df_impute[col_c].isna()
 
         if rule_type == "multiply":
-            # Impute col_a = col_c / col_b
             imputable_a = mask_a & ~mask_b & ~mask_c & (df_impute[col_b] != 0)
             df_impute.loc[imputable_a, col_a] = df_impute.loc[imputable_a, col_c] / df_impute.loc[imputable_a, col_b]
 
-            # Impute col_b = col_c / col_a
             imputable_b = mask_b & ~mask_a & ~mask_c & (df_impute[col_a] != 0)
             df_impute.loc[imputable_b, col_b] = df_impute.loc[imputable_b, col_c] / df_impute.loc[imputable_b, col_a]
 
-            # Impute col_c = col_a * col_b
             imputable_c = mask_c & ~mask_a & ~mask_b
             df_impute.loc[imputable_c, col_c] = df_impute.loc[imputable_c, col_a] * df_impute.loc[imputable_c, col_b]
 
         elif rule_type == "add":
-            # Impute col_a = col_c - col_b
             imputable_a = mask_a & ~mask_b & ~mask_c
             df_impute.loc[imputable_a, col_a] = df_impute.loc[imputable_a, col_c] - df_impute.loc[imputable_a, col_b]
 
-            # Impute col_b = col_c - col_a
             imputable_b = mask_b & ~mask_a & ~mask_c
             df_impute.loc[imputable_b, col_b] = df_impute.loc[imputable_b, col_c] - df_impute.loc[imputable_b, col_a]
 
-            # Impute col_c = col_a + col_b
             imputable_c = mask_c & ~mask_a & ~mask_b
             df_impute.loc[imputable_c, col_c] = df_impute.loc[imputable_c, col_a] + df_impute.loc[imputable_c, col_b]
 
-    # Handle remaining nulls with strategic imputation
     for col in df_impute.columns:
         if col_type_map[col] == "numeric":
             df_impute[col].fillna(df_impute[col].median(), inplace=True)
@@ -431,13 +337,8 @@ def impute_nulls(
 
     return df_impute
 
-
-# ============================================================================
-# OUTLIER DETECTION
-# ============================================================================
-
 def flag_outliers(df: pd.DataFrame, numeric_cols: List[str]) -> pd.DataFrame:
-    """Flag outliers using IQR method."""
+    """Flag outliers using IQR."""
     df_flag = df.copy()
 
     for col in numeric_cols:
@@ -450,3 +351,61 @@ def flag_outliers(df: pd.DataFrame, numeric_cols: List[str]) -> pd.DataFrame:
 
         outliers = (df_flag[col] < lower_bound) | (df_flag[col] > upper_bound)
         df_flag[f'{col}_outlier_flag'] = outliers
+
+    return df_flag
+
+def execute_cleaning(df: pd.DataFrame, numeric_cols: List[str], text_cols: List[str]) -> pd.DataFrame:
+    """Execute full cleaning pipeline."""
+    df_clean = df.copy()
+    
+    # Profile types
+    col_types = profile_types(df_clean)
+    
+    # Clean columns
+    df_clean = clean_numeric(df_clean, numeric_cols)
+    df_clean = clean_text(df_clean, text_cols)
+    
+    # Discover and impute
+    algebraic_ids = discover_identities(df_clean, numeric_cols)
+    df_clean = impute_nulls(df_clean, col_types, algebraic_ids)
+    
+    # Flag outliers
+    df_clean = flag_outliers(df_clean, numeric_cols)
+    
+    return df_clean
+
+# ============================================================================
+# UI LAYOUT
+# ============================================================================
+
+st.set_page_config(page_title="Data Janitor Pro", page_icon="🧹", layout="wide")
+st.title("🧹 Data Janitor Pro: Meta-Engine v5.0")
+
+is_admin = render_login()
+
+# File upload
+uploaded_file = st.file_uploader("Upload CSV or Excel file", type=["csv", "xlsx"])
+
+if uploaded_file:
+    if uploaded_file.name.endswith('.csv'):
+        df = pd.read_csv(uploaded_file)
+    else:
+        df = pd.read_excel(uploaded_file)
+
+    st.subheader("📊 Data Preview")
+    st.dataframe(df.head(20))
+
+    st.subheader("📈 Data Profile")
+    col_types = profile_types(df)
+    type_summary = pd.DataFrame(list(col_types.items()), columns=["Column", "Detected Type"])
+    st.dataframe(type_summary)
+
+    # Get numeric and text columns
+    numeric_cols = [col for col, ctype in col_types.items() if ctype == "numeric"]
+    text_cols = [col for col, ctype in col_types.items() if ctype in ["categorical_text", "system_key"]]
+
+    st.subheader("🔧 Cleaning Options")
+    col1, col2 = st.columns(2)
+
+    with col1:
+        clean_numeric_flag = st.checkbox("Clean numeric
