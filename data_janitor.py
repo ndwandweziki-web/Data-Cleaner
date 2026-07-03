@@ -44,7 +44,7 @@ ANALYTICS_DB = "universal_analytics.db"
 
 st.set_page_config(
     page_title="Data Janitor Pro Meta-Engine v5.0",
-    page_icon="",
+    page_icon="🧹",
     layout="wide"
 )
 
@@ -462,4 +462,84 @@ def flag_outliers(df: pd.DataFrame, numeric_cols: List[str]) -> pd.DataFrame:
         Q3 = df_flag[col].quantile(0.75)
         IQR = Q3 - Q1
 
-        lower_bound = Q1 - IQ
+        lower_bound = Q1 - (IQR * IQR_MULT)
+        upper_bound = Q3 + (IQR * IQR_MULT)
+        
+        # Tag rows escaping standard Interquartile parameters
+        df_flag[f'{col}_outlier'] = (df_flag[col] < lower_bound) | (df_flag[col] > upper_bound)
+
+    return df_flag
+
+
+# ============================================================================
+# MAIN INTERFACE ORCHESTRATOR
+# ============================================================================
+
+def main():
+    st.title("🧹 Data Janitor Pro: Meta-Engine v5.0")
+    st.subheader("Autonomous Self-Correcting Data Cleaning Suite")
+    
+    # DB Bootstrap safely within runtime
+    try:
+        init_db()
+    except Exception as e:
+        st.error(f"Database Core Setup Error: {e}")
+    
+    # Active Administrative Portal
+    is_authenticated = render_login_panel()
+    if is_authenticated:
+        st.info("🔓 Root access validation confirmed. Analytics persistence ready.")
+
+    # Primary Upload Hub
+    uploaded_file = st.file_uploader("Upload Target Dataset (CSV)", type=["csv"])
+    
+    if uploaded_file is not None:
+        if st.session_state.uploaded_df is None:
+            st.session_state.uploaded_df = pd.read_csv(uploaded_file)
+            log_audit("FILE_UPLOAD", f"Filename: {uploaded_file.name}")
+            
+        df = st.session_state.uploaded_df
+        
+        st.write("### Raw Payload Preview")
+        st.dataframe(df.head(10))
+        
+        if st.button("🚀 Execute Autonomous Pipeline"):
+            with st.spinner("Analyzing structures, unifying text structures, and reconciling algebraic data..."):
+                # Semantic mapping
+                col_types = profile_df_types(df)
+                numeric_cols = [c for c, t in col_types.items() if t == "numeric"]
+                text_cols = [c for c, t in col_types.items() if t == "categorical_text"]
+                
+                # Cleaning execution pipeline
+                cleaned_df = clean_numeric(df, numeric_cols)
+                cleaned_df = clean_text(cleaned_df, text_cols)
+                
+                # Algebraic parsing & advanced missing value synthesis
+                identities = discover_algebraic_identities(cleaned_df, numeric_cols)
+                cleaned_df = impute_nulls(cleaned_df, col_types, identities)
+                
+                # Structural variance parsing (Outliers)
+                cleaned_df = flag_outliers(cleaned_df, numeric_cols)
+                
+                st.session_state.cleaned_df = cleaned_df
+                log_audit("CLEAN_EXECUTION_SUCCESS", f"Processed data array containing {len(df)} units.")
+                st.success("Data Processing Workflow Completed!")
+                
+        if st.session_state.cleaned_df is not None:
+            st.write("### Sanitized Output Ledger")
+            st.dataframe(st.session_state.cleaned_df.head(10))
+            
+            # Export payload configuration
+            csv_buffer = io.StringIO()
+            st.session_state.cleaned_df.to_csv(csv_buffer, index=False)
+            
+            st.download_button(
+                label="📥 Download Sanitized CSV Ledger",
+                data=csv_buffer.getvalue(),
+                file_name="sanitized_ledger_v5.csv",
+                mime="text/csv"
+            )
+
+
+if __name__ == "__main__":
+    main()
